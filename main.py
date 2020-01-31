@@ -1,4 +1,5 @@
 from const import *
+from data_io import *
 import numpy as np
 from time import time
 import tensorflow as tf
@@ -48,7 +49,7 @@ def step(u: Tensor, u_d: Tensor, n: Tensor, dz):
     u = tf.signal.ifft2d(tf.cos(kz * dz) * a + (tf.sin(kz * dz) / kz) * a_d)
     u_d = tf.signal.ifft2d(-(tf.sin(kz * dz) * kz) * a + tf.cos(kz * dz) * a_d)
     # n = n / N0
-    # u_d -= (4 * np.pi * dz * RES[2] ** 2) * (tf.multiply(n, 2 * N0) + tf.square(n)) * u
+    u_d -= (4 * np.pi * dz * RES[2] ** 2) * (tf.multiply(n, 2 * N0) + tf.square(n)) * u
     return u, u_d
 
 
@@ -57,10 +58,9 @@ def main():
     # u: Tensor = tf.constant(np.random.rand(1024, 1024), dtype=tf.complex64)
     # u_d = tf.constant(np.zeros((1024, 1024)), dtype=tf.complex64)
     # n = tf.constant(np.zeros((26, 512, 512)), dtype=tf.complex64)
-    n = [[[0.05 if i * i + j * j + k * k < 100 else 0
-           for i in range(-256, 256)] for j in range(-256, 256)] for k in range(-20, 80)]
-    # n = np.array(n)
-    n = tf.constant(n, dtype=tf.complex64)
+
+    # n = tf.constant(0, shape=(400, 512, 512), dtype=DATA_TYPE)
+    n = n_ball(0.05, 10, z_empty=(5, 150))
     img_in = tifffile.imread("a.tiff")
     img_in = tf.constant(img_in, dtype=tf.complex64)
     # img_in = tf.constant(np.ones((512, 512)), dtype=tf.complex64)
@@ -72,12 +72,12 @@ def main():
         ooo.append(img_in)
     print(time() - t)
 
-    ooo = tf.cast(tf.abs(tf.stack(ooo)[..., None]) * 0.7, tf.uint64).numpy()
+    ooo = tf.cast(tf.abs(tf.stack(ooo)[..., None]) * 0.4, tf.uint64).numpy()
     ooo[ooo > 65535] = 65535
     # ooo = tf.stack(ooo)[..., None].numpy()
     # for i in ooo:
     #     print(np.sum(i))
-    tifffile.imsave("c.tiff", ooo.astype(np.uint16))
+    tifffile.imsave("b.tiff", ooo.astype(np.uint16))
     return ooo
 
 

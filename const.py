@@ -7,7 +7,7 @@ import math
 import tensorflow as tf
 
 N0 = 1.
-RES = (1, 1, 1)  # pixel_size = RES * lambda0
+RES = (0.5, 0.5, 0.5)  # pixel_size = RES * lambda0
 SIZE = (512, 512, None)  # better to be even numbers
 DATA_TYPE = tf.complex64
 EPS = 1E-10
