@@ -25,11 +25,7 @@ def main():
 
     tiff_write("b.tiff", step_list, pre_operator=lambda x: np.abs(x))
 
-    # step_list[step_list > 65535] = 65535
-    # ooo = tf.stack(ooo)[..., None].numpy()
-    # for i in ooo:
-    #     print(np.sum(i))
-    # tifffile.imsave("b.tiff", step_list.astype(np.uint16), compress=9)
+
     return step_list
 
 
