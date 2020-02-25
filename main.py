@@ -11,7 +11,7 @@ class SizeWarning(RuntimeWarning):
 
 def main():
     # n = tf.constant(0.8, shape=(150, 256, 256), dtype=DATA_TYPE)
-    n = n_ball(0.03, 5, z_empty=(3, 3))
+    n = n_ball(0.01, 5, z_empty=(3, 3))
     img_in = tiff_import("tilt45.tiff", (0, np.pi/4))
     # {0: 40/nz/350, 45: 30/nz/250, 60: resz0.1/30/nz/400}
     u_d = nature_d(img_in)
@@ -32,7 +32,7 @@ def main():
     # for n_zi in n:
     #     img_in = bpm_step(img_in, 1, n_zi)
     #     step_list.append(img_in)
-    # for i in range(500):
+    # for i in range(250):
     #     img_in = bpm_step(img_in, 1)
     #     step_list.append(img_in)
     print(time() - t)

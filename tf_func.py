@@ -39,13 +39,13 @@ def _outflow_absorb() -> np.ndarray:
 
 def _evanescent_absorb() -> np.ndarray:
     """
-        For 0.98<N.A.<1, decrease to 1~1/e per step
+        For 0.95<N.A.<1, decrease to 1~1/e per step
 
         For N.A.>1 decrease to 1/e per step
 
         :return: a 2D angular spectrum transmittance numpy array
     """
-    return np.exp(np.minimum((_c_gamma() - 0.2) * 5, 0))
+    return np.exp(np.minimum((_c_gamma() - (1 / 3)) * 3, 0))
 
 
 @tf.function
@@ -94,7 +94,7 @@ def ssnp_step(u: Tensor, u_d: Tensor, dz, n=None) -> tuple:
     u_d = tf.signal.ifft2d(-(tf.sin(_kz() * dz) * _kz()) * a + tf.cos(_kz() * dz) * a_d)
     # n = n / N0
     if n is not None:
-        u_d -= (4 * np.pi * dz * RES[2] ** 2) * (n * (2 * N0 + n) * u)
+        u_d -= ((2 * np.pi * RES[2]) ** 2 * dz) * (n * (2 * N0 + n) * u)
     absorb = tf.constant(_outflow_absorb(), DATA_TYPE)
     u *= absorb
     u_d *= absorb
