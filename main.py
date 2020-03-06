@@ -10,9 +10,9 @@ class SizeWarning(RuntimeWarning):
 
 
 def main():
-    # n = tf.constant(0.8, shape=(150, 256, 256), dtype=DATA_TYPE)
-    n = n_ball(0.01, 5, z_empty=(3, 3))
-    img_in = tiff_import("tilt45.tiff", (0, np.pi/4))
+    n = tf.constant(0.05, shape=(30, 256, 256), dtype=DATA_TYPE)
+    # n = n_ball(0.01, 5, z_empty=(3, 3))
+    img_in = tiff_import("tilt45s.tiff", (0, np.pi / 6))
     # {0: 40/nz/350, 45: 30/nz/250, 60: resz0.1/30/nz/400}
     u_d = nature_d(img_in)
     step_list = [img_in]

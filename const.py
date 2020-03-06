@@ -12,7 +12,7 @@ import tensorflow as tf
 
 N0 = 1.
 RES = (0.25, 0.25, 0.25)  # pixel_size = RES * lambda0
-SIZE = (512, 512, 0)  # better to be even numbers
+SIZE = (256, 256, 0)  # better to be even numbers
 DATA_TYPE = tf.complex128
 EPS = 1E-6
 # DATA_TYPE_R = tf.float32

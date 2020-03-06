@@ -39,13 +39,13 @@ def _outflow_absorb() -> np.ndarray:
 
 def _evanescent_absorb() -> np.ndarray:
     """
-        For 0.95<N.A.<1, decrease to 1~1/e per step
+        For 0.98<N.A.<1, decrease to 1~1/e per step
 
         For N.A.>1 decrease to 1/e per step
 
         :return: a 2D angular spectrum transmittance numpy array
     """
-    return np.exp(np.minimum((_c_gamma() - (1 / 3)) * 3, 0))
+    return np.exp(np.minimum((_c_gamma() - 0.2) * 5, 0))
 
 
 @tf.function
@@ -67,6 +67,11 @@ def nature_d(u: Tensor):
     a_d = _kz() * a * 1j
     u_d = tf.signal.ifft2d(a_d)
     return u_d
+
+
+@tf.function
+def split_forward_backward(u, u_d):
+    pass
 
 
 @tf.function
@@ -142,3 +147,23 @@ def n_ball(n, r, *, z_empty: tuple) -> Tensor:
            :, None, None]
     out = tf.cast(tf.minimum(tf.exp(-arr / (r * r) * 9.21034), 0.0001) * 10000 * n, DATA_TYPE)
     return out
+
+
+def backprop_loss(model, re, im):
+    @tf.function
+    def func():
+        u, u_d = model(re, im)
+        a = tf.signal.fft2d(u)
+        a_d = tf.signal.fft2d(u_d)
+        return tf.reduce_sum(tf.abs((a_d - _kz() * a * 1j)))
+
+    return func
+
+
+def zz_loss(model, re, im, u0):
+    @tf.function
+    def func():
+        u, _ = model(re, im)
+        return tf.reduce_sum(tf.abs(u - u0))
+
+    return func
