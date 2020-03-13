@@ -50,6 +50,12 @@ def _phase_init(xy_theta, gamma):
     """
     if gamma > EPS:
         lz = 1 / np.sin(gamma)
+
+        # if CIRCULATE_ALLOW:
+        #     lz = round(lz)
+        #     if lz == 0:
+        #         return np.zeros(SIZE[:2], np.double)
+
         xr, yr = [(np.cos(xy_theta), np.sin(xy_theta))[i] * np.arange(SIZE[i]) * RES[i]
                   for i in (0, 1)]
         phase = (np.mod(xr - yr[:, None], lz) / lz).astype(np.double)
@@ -88,3 +94,13 @@ def tiff_import(path: str, phase_info: Union[str, tuple]):
     phase *= 2 * np.pi
     img_in = np.cos(phase) * img_in + 1j * np.sin(phase) * img_in
     return tf.constant(img_in, DATA_TYPE)
+
+
+def tiff_n(path: str):
+    img = imread(path)
+    if img.dtype.type == np.uint16:
+        img = img.astype(np.double) / 65535
+    elif img.dtype.type == np.uint8:
+        warn("Importing uint8 image, please use uint16 if possible")
+        img = img.astype(np.double) / 255
+    return tf.constant(img, DATA_TYPE)
