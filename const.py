@@ -5,8 +5,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 import platform
 
 if platform.system() == 'Windows':
-    os.environ['PATH'] = 'C:\\Users\\zjb\\AppData\\Roaming\\Mathematica\\Paclets\\Repository\\' \
-                         'CUDAResources-Win64-12.0.359\\CUDAToolkit\\bin;' + os.environ['PATH']
+    os.environ['PATH'] = 'C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v10.1\\bin;' + os.environ['PATH']
 
 import tensorflow as tf
 

@@ -25,7 +25,7 @@ def main():
     for n_zi in n:
         img_in, u_d = ssnp_step(img_in, u_d, 1, n_zi)
         step_list.append(img_in)
-    for i in range(250):
+    for i in range(50):
         img_in, u_d = ssnp_step(img_in, u_d, 1)
         step_list.append(img_in)
     # for i in range(30):
