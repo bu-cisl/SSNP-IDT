@@ -6,7 +6,7 @@ from warnings import warn
 from typing import Union
 
 
-def tiff_export(path: str, images, *, scale=None, pre_operator: callable = None, dtype=np.uint16):
+def tiff_export(path: str, images, *, scale=1, pre_operator: callable = None, dtype=np.uint16):
     """
     Export a list of Tensors to a multi-page tiff
 
@@ -41,59 +41,44 @@ def tiff_export(path: str, images, *, scale=None, pre_operator: callable = None,
         raise ValueError(f"dtype should be either np.uint8 or np.uint16, but not {dtype}")
 
 
-def _phase_init(xy_theta, gamma):
+def _phase_init(c_ab):
     """
-
-    :param xy_theta: Angle of wave vector projection at x-y plane to x-axis
-    :param gamma: Angle between the wave vector and z-axis. Note: N.A.=sin(gamma)
+    :param c_ab: (cos(alpha), cos(beta))
     :return:
     """
-    if gamma > EPS:
-        lz = 1 / np.sin(gamma)
-
-        # if CIRCULATE_ALLOW:
-        #     lz = round(lz)
-        #     if lz == 0:
-        #         return np.zeros(SIZE[:2], np.double)
-
-        xr, yr = [(np.cos(xy_theta), np.sin(xy_theta))[i] * np.arange(SIZE[i]) * RES[i]
-                  for i in (0, 1)]
-        phase = (np.mod(xr - yr[:, None], lz) / lz).astype(np.double)
-    else:
-        phase = np.zeros(SIZE[:2], np.double)
-    return phase
+    norm = [SIZE[i] * RES[i] * N0 for i in (0, 1)]
+    c_ab = [np.trunc(c_ab[i] * norm[i]) / norm[i] for i in (0, 1)]
+    xr, yr = [np.arange(SIZE[i]) / SIZE[i] * c_ab[i] * norm[i] for i in (0, 1)]
+    phase = np.mod(xr + yr[:, None], 1).astype(np.double)
+    return phase, c_ab
 
 
-def tiff_import(path: str, phase_info: Union[str, tuple]):
+def tiff_illumination(path: str, c_ab: tuple):
     """
     :param path: Amplitude graph path
-    :param phase_info: Phase graph path string, or (xy_theta, gamma)
+    :param c_ab: (cos(alpha), cos(beta))
     :return: complex tf Tensor of input field
     """
 
     def convert_01(p: str):
-        img = imread(p)
-        if img.shape != SIZE[:2]:
-            raise ValueError(f"Input image size {img.shape} is incompatible"
+        raw_img = imread(p)
+        if raw_img.shape != SIZE[:2]:
+            raise ValueError(f"Input image size {raw_img.shape} is incompatible"
                              "with x-y size {SIZE[:2]}")
-        if img.dtype.type == np.uint16:
-            img = img.astype(np.double) / 65535
-        elif img.dtype.type == np.uint8:
+        if raw_img.dtype.type == np.uint16:
+            img = raw_img.astype(np.double) / 65535
+        elif raw_img.dtype.type == np.uint8:
             warn("Importing uint8 image, please use uint16 if possible")
-            img = img.astype(np.double) / 255
+            img = raw_img.astype(np.double) / 255
         else:
             raise TypeError("Unknown data type of input image")
         return img
 
     img_in = convert_01(path)
-    if type(phase_info) == str:
-        phase = convert_01(phase_info)
-    else:
-        phase = _phase_init(*phase_info)
-    assert phase.dtype.type == img_in.dtype.type == np.double
+    phase, c_ab_trunc = _phase_init(c_ab)
     phase *= 2 * np.pi
-    img_in = np.cos(phase) * img_in + 1j * np.sin(phase) * img_in
-    return tf.constant(img_in, DATA_TYPE)
+    img_in = np.exp(1j * phase) * img_in
+    return tf.constant(img_in, DATA_TYPE), c_ab_trunc
 
 
 def tiff_n(path: str):
