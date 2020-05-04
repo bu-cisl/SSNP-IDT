@@ -49,18 +49,16 @@ def _evanescent_absorb() -> np.ndarray:
     return np.exp(np.minimum((_c_gamma() - 0.2) * 5, 0))
 
 
-@tf.function
-def pupil(u, na):
-    mask = (_c_gamma() > np.sqrt(1 - na ** 2)).astype(np.double)
+def binary_pupil(u, na):
+    mask = tf.cast(tf.greater(_c_gamma(), np.sqrt(1 - na ** 2)), DATA_TYPE)
     return tf.signal.ifft2d(tf.signal.fft2d(u) * mask)
 
-@tf.function
+
 def _kz():
     kz = tf.constant(_c_gamma() * (2 * np.pi * RES[2] * N0), DATA_TYPE)
     return kz
 
 
-@tf.function
 def nature_d(u: Tensor):
     """
     Calculate z partial derivative for a initial x-y complex amplitude in free
@@ -101,9 +99,10 @@ def ssnp_step(u: Tensor, u_d: Tensor, dz, n=None) -> tuple:
     # n = n / N0
     if n is not None:
         u_d -= ((2 * np.pi * RES[2]) ** 2 * dz) * (n * (2 * N0 + n) * u)
-    # absorb = tf.constant(_outflow_absorb(), DATA_TYPE)
-    # u *= absorb
-    # u_d *= absorb
+    if not PERIODIC_BOUNDARY:
+        absorb = tf.constant(_outflow_absorb(), DATA_TYPE)
+        u *= absorb
+        u_d *= absorb
     return u, u_d
 
 
@@ -128,8 +127,9 @@ def bpm_step(u: Tensor, dz, n=None) -> tuple:
     u = tf.signal.ifft2d(tf.exp(_kz() * (1j * dz)) * a)
     if n is not None:
         u *= tf.exp(n * (1j * (2 * np.pi * RES[2] * N0) * dz))
-    absorb = tf.constant(_outflow_absorb(), DATA_TYPE)
-    u *= absorb
+    if not PERIODIC_BOUNDARY:
+        absorb = tf.constant(_outflow_absorb(), DATA_TYPE)
+        u *= absorb
     return u
 
 
@@ -170,64 +170,64 @@ def zz_loss(model, re, im, u0):
     return func
 
 
-class Beam:
-    u = u_d = None
-    a = a_d = None
-    n = None
-    is_free = True
-    back_prop = False
-
-    def __init__(self, u, n, free=(0, 0), back_prop=False):
-        if u.shape != SIZE[:2]:
-            raise ValueError(f"the x,y shape of input field {u.shape} is not {SIZE[:2]}")
-        if n.shape[1:] != SIZE[:2]:
-            raise ValueError(f"the x,y shape of medium {n.shape} is not {SIZE[:2]}")
-        self.u = u
-        self.a = tf.signal.fft2d(u)
-        self.n = n
-        self.free = free
-        self.back_prop = back_prop
-
-    def steps(self, method='SSNP', pass_free=True):
-        method = method.upper()
-        method = {'SSNP': self.ssnp_step, 'BPM': self.bpm_step}[method]
-        direction = {False: 1, True: -1}[self.back_prop]
-        pre, post = reversed(self.free) if self.back_prop else self.free
-        n = reversed(self.n) if self.back_prop else self.n
-        if not pass_free:
-            for _ in range(pre):
-                method(direction)
-                yield
-        elif pre > 0:
-            method(direction * pre)
-            yield
-
-        self.is_free = False
-        for n_i in n:
-            method(direction, n_i)
-            yield
-
-        self.is_free = True
-        if not pass_free:
-            for _ in range(post):
-                method(direction)
-                yield
-        elif post > 0:
-            method(direction * post)
-            yield
-
-    @tf.function
-    def ssnp_step(self, dz, n=None):
-        pass
-
-    @tf.function
-    def bpm_step(self, dz, n=None):
-        pass
-
-    @tf.function
-    def get_forward(self):
-        return self.u
-
-    @tf.function
-    def get_backward(self):
-        return
+# class Beam:
+#     u = u_d = None
+#     a = a_d = None
+#     n = None
+#     is_free = True
+#     back_prop = False
+#
+#     def __init__(self, u, n, free=(0, 0), back_prop=False):
+#         if u.shape != SIZE[:2]:
+#             raise ValueError(f"the x,y shape of input field {u.shape} is not {SIZE[:2]}")
+#         if n.shape[1:] != SIZE[:2]:
+#             raise ValueError(f"the x,y shape of medium {n.shape} is not {SIZE[:2]}")
+#         self.u = u
+#         self.a = tf.signal.fft2d(u)
+#         self.n = n
+#         self.free = free
+#         self.back_prop = back_prop
+#
+#     def steps(self, method='SSNP', pass_free=True):
+#         method = method.upper()
+#         method = {'SSNP': self.ssnp_step, 'BPM': self.bpm_step}[method]
+#         direction = {False: 1, True: -1}[self.back_prop]
+#         pre, post = reversed(self.free) if self.back_prop else self.free
+#         n = reversed(self.n) if self.back_prop else self.n
+#         if not pass_free:
+#             for _ in range(pre):
+#                 method(direction)
+#                 yield
+#         elif pre > 0:
+#             method(direction * pre)
+#             yield
+#
+#         self.is_free = False
+#         for n_i in n:
+#             method(direction, n_i)
+#             yield
+#
+#         self.is_free = True
+#         if not pass_free:
+#             for _ in range(post):
+#                 method(direction)
+#                 yield
+#         elif post > 0:
+#             method(direction * post)
+#             yield
+#
+#     @tf.function
+#     def ssnp_step(self, dz, n=None):
+#         pass
+#
+#     @tf.function
+#     def bpm_step(self, dz, n=None):
+#         pass
+#
+#     @tf.function
+#     def get_forward(self):
+#         return self.u
+#
+#     @tf.function
+#     def get_backward(self):
+#         return

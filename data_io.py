@@ -1,9 +1,10 @@
 from const import *
 import tensorflow as tf
 import numpy as np
-from tifffile import TiffWriter, imread
+from tifffile import TiffWriter, TiffFile
 from warnings import warn
-from typing import Union
+import os
+import csv
 
 
 def tiff_export(path: str, images, *, scale=1, pre_operator: callable = None, dtype=np.uint16):
@@ -41,16 +42,17 @@ def tiff_export(path: str, images, *, scale=1, pre_operator: callable = None, dt
         raise ValueError(f"dtype should be either np.uint8 or np.uint16, but not {dtype}")
 
 
-def _phase_init(c_ab):
+def _phase_init(c_ab, trunc=False):
     """
     :param c_ab: (cos(alpha), cos(beta))
     :return:
     """
     norm = [SIZE[i] * RES[i] * N0 for i in (0, 1)]
-    c_ab = [np.trunc(c_ab[i] * norm[i]) / norm[i] for i in (0, 1)]
+    if trunc:
+        c_ab = [np.trunc(c_ab[i] * norm[i]) / norm[i] for i in (0, 1)]
     xr, yr = [np.arange(SIZE[i]) / SIZE[i] * c_ab[i] * norm[i] for i in (0, 1)]
     phase = np.mod(xr + yr[:, None], 1).astype(np.double)
-    return phase, c_ab
+    return 2 * np.pi * phase, c_ab
 
 
 def tiff_illumination(path: str, c_ab: tuple):
@@ -61,10 +63,11 @@ def tiff_illumination(path: str, c_ab: tuple):
     """
 
     def convert_01(p: str):
-        raw_img = imread(p)
+        with TiffFile(p) as file:
+            raw_img = np.squeeze(np.stack([page.asarray() for page in file.pages]))
         if raw_img.shape != SIZE[:2]:
             raise ValueError(f"Input image size {raw_img.shape} is incompatible"
-                             "with x-y size {SIZE[:2]}")
+                             f"with x-y size {SIZE[:2]}")
         if raw_img.dtype.type == np.uint16:
             img = raw_img.astype(np.double) / 65535
         elif raw_img.dtype.type == np.uint8:
@@ -74,18 +77,39 @@ def tiff_illumination(path: str, c_ab: tuple):
             raise TypeError("Unknown data type of input image")
         return img
 
-    img_in = convert_01(path)
-    phase, c_ab_trunc = _phase_init(c_ab)
-    phase *= 2 * np.pi
+    if path == "plane":
+        img_in = np.ones(SIZE[:2], np.double)
+    elif os.access(path, os.R_OK):
+        img_in = convert_01(path)
+    else:
+        raise FileNotFoundError(f"'{path}' is not a known illumination type nor a valid file path")
+    phase, c_ab_final = _phase_init(c_ab, trunc=PERIODIC_BOUNDARY)
     img_in = np.exp(1j * phase) * img_in
-    return tf.constant(img_in, DATA_TYPE), c_ab_trunc
+    return tf.constant(img_in, DATA_TYPE), c_ab_final
 
 
-def tiff_n(path: str):
-    img = imread(path)
+def tiff_import(path: str, dtype=DATA_TYPE):
+    with TiffFile(path) as file:
+        img = np.squeeze(np.stack([page.asarray() for page in file.pages]))
     if img.dtype.type == np.uint16:
         img = img.astype(np.double) / 65535
     elif img.dtype.type == np.uint8:
         warn("Importing uint8 image, please use uint16 if possible")
         img = img.astype(np.double) / 255
-    return tf.constant(img, DATA_TYPE)
+    return tf.constant(img, dtype)
+
+
+def csv_import(path: str):
+    table = []
+    with open(path, 'r', newline='') as file:
+        reader = csv.reader(file, quoting=csv.QUOTE_NONNUMERIC)
+        for row in reader:
+            table.append(row)
+    return table
+
+
+def csv_export(path: str, table):
+    with open(path, 'w', newline='') as file:
+        writer = csv.writer(file)
+        for row in table:
+            writer.writerow(row)

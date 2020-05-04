@@ -10,11 +10,18 @@ if platform.system() == 'Windows':
 import tensorflow as tf
 
 N0 = 1.
-# RES = (0.315534, 0.315534, 0.236686)  # pixel_size = RES * lambda0
+PERIODIC_BOUNDARY = True
+# RES = (0.315534, 0.315534, 0.236686)
 RES = (0.25, 0.25, 0.1)
-SIZE = (512, 512, 0)  # better to be even numbers
+"""PixelSize = RES * FreeSpaceWavelength"""
+
+SIZE = (256, 256, 0)  # better to be even numbers
+"""3D (only x,y is used?) volume size (pixels)"""
 DATA_TYPE = tf.complex128
+"""Default complex tensorflow datatype for computation"""
+DATA_TYPE_R = {tf.complex128: tf.float64, tf.complex64: tf.float32}[DATA_TYPE]
 EPS = 1E-6
+"""Small number avoid divided by zero"""
 # CIRCULATE_ALLOW = False
 # DATA_TYPE_R = tf.float32
 
