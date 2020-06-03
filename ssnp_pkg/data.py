@@ -1,13 +1,9 @@
-from const import *
-from .tftool import real_to_complex
 import tensorflow as tf
 import numpy as np
 from tifffile import TiffWriter, TiffFile
 from warnings import warn
 import os
 import csv
-
-# from tensorflow import Tensor
 
 DEFAULT_TYPE = tf.float32
 
@@ -59,10 +55,17 @@ def tiff_read(path, dtype=DEFAULT_TYPE, shape=None):
 
 def np_read(path, dtype=DEFAULT_TYPE, shape=None, *, key=None):
     ext = os.path.splitext(path)[-1]
+    if key is None:
+        key = 'arr_0'
     if ext == '.npy':
         img = np.load(path)
     elif ext == '.npz':
-        img = np.load(path)[key]
+        with np.load(path) as f:
+            try:
+                img = f[key]
+            except KeyError:
+                warn(f"'{key}' is not a file in archive {path}. Reading first file instead.", stacklevel=2)
+                img = f[f.files[0]]
     else:
         raise ValueError(f"unknown filename extension '{ext}'")
     return tf.constant(img, dtype, shape)
@@ -77,14 +80,13 @@ def csv_read(path: str, dtype=DEFAULT_TYPE, shape=None):
     return tf.constant(table, dtype, shape)
 
 
-def read(source: str, dtype=DEFAULT_TYPE, shape=None, *, key=None):
+def read(source: str, dtype=DEFAULT_TYPE, shape=None, **kwargs):
     """
     Read a ``tf.Tensor`` from source. Method is auto-detected corresponding to the file extension.
 
     :param source:
     :param dtype:
     :param shape:
-    :param key:
     :return:
     """
     if source in {'plane'}:
@@ -94,16 +96,16 @@ def read(source: str, dtype=DEFAULT_TYPE, shape=None, *, key=None):
         if ext in {'.tiff', '.tif'}:
             img = tiff_read(source, dtype, shape)
         elif ext in {'.npy', '.npz'}:
-            img = np_read(source, dtype, shape, key=key)
+            img = np_read(source, dtype, shape, **kwargs)
         elif ext == '.csv':
             img = csv_read(source, dtype, shape)
         else:
             raise ValueError(f"unknown filename extension '{ext}'")
     else:
         raise FileNotFoundError(f"'{source}' is not a known illumination type nor a valid file path")
-    rank = tf.rank(img)
+    rank = len(img.shape)
     if rank not in {2, 3}:
-        warn(f"Importing {rank}-D image with shape {img.shape}")
+        warn(f"Importing {rank}-D image with shape {img.shape}", stacklevel=2)
     return img
 
 
@@ -156,6 +158,26 @@ def tiff_write(path, tensor, *, scale=1, pre_operator: callable = None, dtype=np
         raise TypeError(f"dtype should be either np.uint8 or np.uint16, but not {dtype}") from e
 
 
+def np_write(path, tensor, *, scale=1., pre_operator: callable = None, dtype=None, compress: bool = True):
+    try:
+        i = tensor.numpy()
+    except AttributeError as e:
+        try:
+            i = np.array(tensor)
+        except Exception as ee:
+            raise TypeError(f"Must export numpy compatible Tensors but got {type(tensor)}") from ee
+    if pre_operator is not None:
+        i = pre_operator(i)
+    i *= scale
+    if dtype is not None:
+        i = i.astype(dtype)
+    ext = os.path.splitext(path)[-1]
+    if ext == '.npy':
+        np.save(path, i)
+    elif ext == '.npz':
+        np.savez_compressed(path, i) if compress else np.savez(path, i)
+
+
 def csv_write(path: str, table):
     with open(path, 'w', newline='') as file:
         writer = csv.writer(file)
@@ -163,24 +185,13 @@ def csv_write(path: str, table):
             writer.writerow(row)
 
 
-def tilt_illumination(img, c_ab, *, trunc=False):
-    """
-    Tilt an image as illumination
-    :param img: Amplitude graph
-    :param c_ab: (cos(alpha), cos(beta))
-    :param trunc: whether trunc to a grid point in Fourier plane
-    :return: complex tf Tensor of input field
-    """
-    if not img.dtype.is_complex:
-        img = real_to_complex(img)
-    size = img.shape[::-1]
-    if len(size) != 2:
-        raise ValueError(f"Illumination should be a 2-D tensor rather than shape '{img.shape}'.")
-    norm = [size[i] * RES[i] * N0 for i in (0, 1)]
-    if trunc:
-        c_ab = [np.trunc(c_ab[i] * norm[i]) / norm[i] for i in (0, 1)]
-    xr, yr = [np.arange(size[i]) / size[i] * c_ab[i] * norm[i] for i in (0, 1)]
-    phase = np.mod(xr + yr[:, None], 1).astype(np.double) * 2 * np.pi
-    phase = tf.constant(phase, img.dtype)
-    img = tf.exp(1j * phase) * img
-    return img, c_ab
+def write(dest, tensor, **kwargs):
+    ext = os.path.splitext(dest)[-1]
+    if ext in {'.tiff', '.tif'}:
+        tiff_write(dest, tensor, **kwargs)
+    elif ext in {'.npy', '.npz'}:
+        np_write(dest, tensor, **kwargs)
+    elif ext == '.csv':
+        csv_write(dest, tensor)
+    else:
+        raise ValueError(f"unknown filename extension '{ext}'")
