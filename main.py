@@ -1,16 +1,15 @@
 import os
 import platform
 from time import time
-import numpy as np
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 if platform.system() == 'Windows':
     os.environ['PATH'] = 'C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v10.1\\bin;' + os.environ['PATH']
 
-# from data_io import *
+import numpy as np
 import tensorflow as tf
-from tf_func import pure_forward_d, ssnp_step, bpm_step, n_ball, binary_pupil, n_grating, split_forward
-import ssnp_pkg
+from tf_func import pure_forward_d, ssnp_step, binary_pupil, split_forward
+import ssnp
 
 NA = 0.65
 
@@ -19,7 +18,7 @@ NA = 0.65
 def model(n, u):
     u_d = pure_forward_d(u)
     n = tf.maximum(n, 0)
-    n = ssnp_pkg.tftool.real_to_complex(n)
+    n = ssnp.tftool.real_to_complex(n)
     # u, u_d = ssnp_step(u, u_d, 0.5)
     for ni in n:
         u, u_d = ssnp_step(u, u_d, 1, ni)
@@ -30,15 +29,15 @@ def model(n, u):
 
 
 def main():
-    n = ssnp_pkg.read('ball.tiff', tf.float64)
+    n = ssnp.read('ball.tiff', tf.float64)
     n = tf.multiply(n, 0.01)
-    # n = ssnp_pkg.read('rec.tiff', tf.float64)
+    # n = ssnp.read('rec.tiff', tf.float64)
     out_list = tf.TensorArray(tf.float64, size=0, dynamic_size=True)
     for num in range(8):
         xy_theta = num / 8 * 2 * np.pi
         c_ab = NA * np.cos(xy_theta), NA * np.sin(xy_theta)
-        img_in = ssnp_pkg.read("plane", tf.complex128, shape=n.shape[1:])
-        img_in, c_ab_trunc = ssnp_pkg.tilt(img_in, c_ab, trunc=True)
+        img_in = ssnp.read("plane", tf.complex128, shape=n.shape[1:])
+        img_in, c_ab_trunc = ssnp.tilt(img_in, c_ab, trunc=True)
         out = model(n, img_in)
         out_list = out_list.write(num, out)
     out_list = out_list.stack()
@@ -46,7 +45,7 @@ def main():
     # step_list.append(pupil(img_in, 0.66))
     # print(time() - t)
 
-    ssnp_pkg.write("mea3b.tiff", out_list, scale=0.5)
+    ssnp.write("mea3b.tiff", out_list, scale=0.5)
     return out_list
 
 
@@ -73,17 +72,17 @@ def tv_loss(n):
 
 
 def rec():
-    n = tf.zeros_like(ssnp_pkg.read('ball.tiff', tf.float64))
-    # n = ssnp_pkg.read('ball.tiff', tf.float64)
+    n = tf.zeros_like(ssnp.read('ball.tiff', tf.float64))
+    # n = ssnp.read('ball.tiff', tf.float64)
     # n = tf.multiply(n, 0.01)
-    u0 = ssnp_pkg.read("mea3b.tiff", dtype=tf.float64)
+    u0 = ssnp.read("mea3b.tiff", dtype=tf.float64)
     u0 = tf.multiply(u0, 2)
     in_list = []
     for num in range(8):
         xy_theta = num / 8 * 2 * np.pi
         c_ab = NA * np.cos(xy_theta), NA * np.sin(xy_theta)
-        img_in = ssnp_pkg.read("plane", tf.complex128, shape=u0.shape[1:])
-        img_in, _ = ssnp_pkg.tilt(img_in, c_ab, trunc=True)
+        img_in = ssnp.read("plane", tf.complex128, shape=u0.shape[1:])
+        img_in, _ = ssnp.tilt(img_in, c_ab, trunc=True)
         in_list.append(img_in)
     # in_list = tf.stack(in_list)
     # print(model_loss(n, in_list, u0))
@@ -96,7 +95,7 @@ def rec():
                 loss = model_loss_single(n, in_list[i], u0[i])
             n = tf.maximum(n - g.gradient(loss, n) * 0.002 * np.exp(it / 5), 0)
 
-    ssnp_pkg.write("rec.tiff", n)
+    ssnp.write("rec.tiff", n)
     return n
 
 
