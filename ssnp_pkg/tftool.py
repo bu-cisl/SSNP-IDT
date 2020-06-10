@@ -4,7 +4,7 @@ from warnings import warn
 
 N0 = 1.
 # RES = (0.315534, 0.315534, 0.236686)
-RES = (0.25, 0.25, 0.1)
+RES = (0.1, 0.1, 0.1)
 
 
 def real_to_complex(real):

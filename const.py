@@ -3,9 +3,9 @@ import tensorflow as tf
 N0 = 1.
 PERIODIC_BOUNDARY = True
 # RES = (0.315534, 0.315534, 0.236686)
-RES = (0.25, 0.25, 0.1)
+RES = (0.1, 0.1, 0.1)
 """PixelSize = RES * FreeSpaceWavelength"""
-SIZE = (128, 128, 0)  # better to be even numbers
+SIZE = (256, 256, 0)  # better to be even numbers
 """3D (only x,y is used?) volume size (pixels)"""
 DATA_TYPE = tf.complex128
 """Default complex tensorflow datatype for computation"""
