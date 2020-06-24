@@ -1,0 +1,3 @@
+from tensorflow import Tensor
+
+def ssnp_step(u: Tensor, u_d: Tensor, dz, n=None) -> tuple: ...

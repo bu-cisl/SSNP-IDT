@@ -109,7 +109,7 @@ def read(source: str, dtype=DEFAULT_TYPE, shape=None, **kwargs):
     return img
 
 
-def tiff_write(path, tensor, *, scale=1, pre_operator: callable = None, dtype=np.uint16, compress: bool = True):
+def tiff_write(path, arr, *, scale=1, pre_operator: callable = None, dtype=np.uint16, compress: bool = True):
     """
     Export a list of Tensors to a multi-page tiff
 
@@ -124,58 +124,46 @@ def tiff_write(path, tensor, *, scale=1, pre_operator: callable = None, dtype=np
     (default) or 8bit - ``np.uint8``
 
     :param path: Target file path
-    :param tensor: Tensor data to be written
+    :param arr: Tensor data to be written
     :param scale: Multiplier to adjust value range
     :param pre_operator: Preprocess function before scaling
     :param dtype: Color depth of the exported image
     :param compress: Using lossless compression
     """
-    try:
-        with TiffWriter(path) as out_file:
-            for i in tensor:
-                try:
-                    i = i.numpy()
-                except AttributeError as e:
-                    if type(i) == np.ndarray:
-                        warn("Export numpy array is not preferred. Use Tensor instead.", DeprecationWarning)
-                    else:
-                        raise TypeError(f"Must export a list of 2-D Tensors but got {type(i)}") from e
-                if len(i.shape) != 2:
-                    raise ValueError(f"Must export a list of 2-D Tensors but got {len(i.shape)}-D data "
-                                     f"with shape as {i.shape}.")
-                if pre_operator is not None:
-                    i = pre_operator(i)
+    arr = np.squeeze(arr)
+    with TiffWriter(path) as out_file:
+        for i in arr:
+
+            if len(i.shape) != 2:
+                raise ValueError(f"Must export a list of 2-D Tensors but got {len(i.shape)}-D data "
+                                 f"with shape as {i.shape}.")
+            if pre_operator is not None:
+                i = pre_operator(i)
+            try:
                 if scale is not None:
                     i *= scale * {np.uint16: 65535, np.uint8: 255}[dtype]
                 i = i.astype(np.int64)
                 np.clip(i, 0, {np.uint16: 65535, np.uint8: 255}[dtype], out=i)
-                i = i.astype(dtype)
-                if compress:
-                    out_file.save(i, compress=9, predictor=True)
-                else:
-                    out_file.save(i)
-    except KeyError as e:
-        raise TypeError(f"dtype should be either np.uint8 or np.uint16, but not {dtype}") from e
+            except KeyError as e:
+                raise TypeError(f"dtype should be either np.uint8 or np.uint16, but not {dtype}") from e
+            i = i.astype(dtype)
+            if compress:
+                out_file.save(i, compress=9, predictor=True)
+            else:
+                out_file.save(i)
 
 
-def np_write(path, tensor, *, scale=1., pre_operator: callable = None, dtype=None, compress: bool = True):
-    try:
-        i = tensor.numpy()
-    except AttributeError as e:
-        try:
-            i = np.array(tensor)
-        except Exception as ee:
-            raise TypeError(f"Must export numpy compatible Tensors but got {type(tensor)}") from ee
+def np_write(path, arr, *, scale=1., pre_operator: callable = None, dtype=None, compress: bool = True):
     if pre_operator is not None:
-        i = pre_operator(i)
-    i *= scale
+        arr = pre_operator(arr)
+    arr *= scale
     if dtype is not None:
-        i = i.astype(dtype)
+        arr = arr.astype(dtype)
     ext = os.path.splitext(path)[-1]
     if ext == '.npy':
-        np.save(path, i)
+        np.save(path, arr)
     elif ext == '.npz':
-        np.savez_compressed(path, i) if compress else np.savez(path, i)
+        np.savez_compressed(path, arr) if compress else np.savez(path, arr)
 
 
 def csv_write(path: str, table):
@@ -186,6 +174,14 @@ def csv_write(path: str, table):
 
 
 def write(dest, tensor, **kwargs):
+    try:
+        arr = tensor.numpy()
+    except AttributeError as e:
+        try:
+            arr = np.array(tensor)
+        except Exception as ee:
+            raise TypeError(f"Must export numpy compatible Tensors but got {type(tensor)}") from ee
+
     ext = os.path.splitext(dest)[-1]
     if ext in {'.tiff', '.tif'}:
         tiff_write(dest, tensor, **kwargs)
@@ -195,3 +191,5 @@ def write(dest, tensor, **kwargs):
         csv_write(dest, tensor)
     else:
         raise ValueError(f"unknown filename extension '{ext}'")
+
+# def conf_load():
