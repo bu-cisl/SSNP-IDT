@@ -1,6 +1,5 @@
 import numpy as np
 
-VERSION = '0.0.1rc2'
 EPS = 1E-6
 """Small number avoid divided by zero"""
 COMPLEX_TYPE = np.complex128
