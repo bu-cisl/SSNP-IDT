@@ -1,3 +1,4 @@
-from tensorflow import Tensor
+from pycuda import gpuarray
 
-def ssnp_step(u: Tensor, u_d: Tensor, dz, n=None) -> tuple: ...
+
+def ssnp_step(u: gpuarray, u_d: gpuarray, dz: float, n: gpuarray = None) -> tuple: ...

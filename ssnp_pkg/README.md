@@ -4,10 +4,10 @@ Split-step non-paraxial beam propagation method
 
 ## Features
 
-* Forward model calculation based on TensorFlow 2.x
-* Common type of file read/write
+* Forward model calculation based on CUDA
+* Read/write data of common file type
 * Gradient calculation
-* Image reconstruction (working)
+* Image reconstruction with regularization (working)
 
 ## Reference
 

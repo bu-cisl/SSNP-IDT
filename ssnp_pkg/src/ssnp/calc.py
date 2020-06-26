@@ -1,18 +1,13 @@
 # import tensorflow as tf
 import numpy as np
-from pycuda import elementwise
-from pycuda.compiler import SourceModule
-
-from .const import EPS, COMPLEX_TYPE
-from pycuda import gpuarray
-# from pycuda import
+from pycuda import elementwise, gpuarray
+from .const import EPS
 from reikna.fft import FFT
 import reikna.cluda as cluda
 
 _res_deprecated = (0.1, 0.1, 0.1)
 _N0_deprecated = 1
 size = None
-__prop_cache = {}
 __funcs_cache = {}
 api = cluda.cuda_api()
 thr = api.Thread.create()
@@ -29,21 +24,24 @@ def ssnp_step(u, u_d, dz, n=None):
     :return: new (u, u_d) after a step towards +z direction
     """
     shape = u.shape
-    for t_in in (u_d, n):
-        if t_in is not None:
-            if t_in.shape != shape:
-                raise ValueError(f"the x,y shape {t_in.shape} is not {shape}")
-    p = _get_ssnp_prop(shape, _res_deprecated, dz)
-    fft = _get_funcs(u)
+    try:
+        assert u_d.shape == shape, "u_d"
+        if n is not None:
+            assert n.shape == shape
+    except AssertionError as name:
+        raise ValueError(f"cannot match {name} shape {n.shape} with u shape {shape}")
+    # p = _get_ssnp_prop(shape, _res_deprecated, dz)
+    funcs = get_funcs(u, _res_deprecated)
 
-    a = fft.fft(u)
-    a_d = fft.fft(u_d)
-    fft.fused_mam(a, a_d, p[0][0], p[0][1], p[1][0], p[1][1])
-    u = fft.ifft(a)
-    u_d = fft.ifft(a_d)
+    a = funcs.fft(u)
+    a_d = funcs.fft(u_d)
+    funcs.diffract(a, a_d, dz)
+    u = funcs.ifft(a)
+    u_d = funcs.ifft(a_d)
     # n = n / N0
     if n is not None:
-        u_d -= ((2 * np.pi * _res_deprecated[2]) ** 2 * dz) * (n * (2 * _N0_deprecated + n) * u)
+        funcs.scatter(u, u_d, n, dz)
+    #    u_d -= ((2 * np.pi * _res_deprecated[2]) ** 2 * dz) * (n * (2 * _N0_deprecated + n) * u)
     # if not PERIODIC_BOUNDARY:
     #     absorb = tf.constant(_outflow_absorb(), DATA_TYPE)
     #     u *= absorb
@@ -68,37 +66,26 @@ def _c_gamma(shape, res):
     return c_gamma
 
 
-def _get_ssnp_prop(shape, res, dz):
-    global __prop_cache
-    try:
-        return __prop_cache[(shape, res, dz)]
-    except KeyError:
-        kz = _c_gamma(shape, res) * (2 * np.pi * res[2] * _N0_deprecated)
-        kz = kz.astype(np.complex128)
-        eva = np.exp(np.minimum((_c_gamma(shape, res) - 0.2) * 5, 0))
-        new_prop = [[], []]
-        new_prop[0].append(thr.to_device(np.cos(kz * dz) * eva))
-        new_prop[0].append(thr.to_device(np.sin(kz * dz) / kz * eva))
-        new_prop[1].append(thr.to_device(-np.sin(kz * dz) * kz * eva))
-        new_prop[1].append(thr.to_device(np.cos(kz * dz) * eva))
-        __prop_cache[(shape, res, dz)] = new_prop
-    return new_prop
-
-
-def _get_funcs(p: gpuarray):
+def get_funcs(p: gpuarray, res):
     global __funcs_cache
+    key = (tuple(p.shape), tuple(res))
     try:
-        return __funcs_cache[p.shape]
+        return __funcs_cache[key]
     except KeyError:
-        funcs = _FFTFuncs(p)
-        __funcs_cache[p.shape] = funcs
+        funcs = _Funcs(p, res, _N0_deprecated)
+        __funcs_cache[key] = funcs
     return funcs
 
 
-class _FFTFuncs:
-    def __init__(self, arr_like: gpuarray):
+class _Funcs:
+    fused_mam_callable = None
+
+    def __init__(self, arr_like: gpuarray, res, n0):
         self.fft_callable = FFT(arr_like).compile(thr)
-        self.fused_mam_callable = _FFTFuncs.fused_mam_kernel(arr_like.shape)
+        self.shape = arr_like.shape
+        self.__prop_cache = {}
+        self.res = res
+        self.n0 = n0
 
     def fft(self, arr: gpuarray, output=False):
         if output:
@@ -114,53 +101,34 @@ class _FFTFuncs:
             o = arr.copy()
         else:
             o = arr
-        _FFTFuncs.conj(o)
+        _Funcs.conj(o)
         o /= w * d
         self.fft_callable(o, o)
-        _FFTFuncs.conj(o)
+        _Funcs.conj(o)
         return o
 
-    def fused_mam(self, *args):
-        block = args[0]._block
-        grid = args[0]._grid
-        assert block[1] * block[2] * grid[1] == 1
-        self.fused_mam_callable(*args, block=block, grid=grid)
+    @classmethod
+    def _fused_mam(cls, *args):
+        if cls.fused_mam_callable is None:
+            kernel = elementwise.ElementwiseKernel(
+                "double2 *a, double2 *b, "
+                "double2 *p00, double2 *p01, double2 *p10, double2 *p11",
+                """
+                temp = cuCfma(a[i], p00[i], cuCmul(b[i], p01[i]));
+                b[i] = cuCfma(a[i], p10[i], cuCmul(b[i], p11[i]));
+                a[i] = temp;
+                """,
+                loop_prep="cuDoubleComplex temp",
+                preamble='#include "cuComplex.h"'
+            )
+            cls.fused_mam_callable = kernel
+        cls.fused_mam_callable(*args)
 
-    # @staticmethod
-    # def fused_mam_kernel2(shape):
-    #     mam = elementwise.ElementwiseKernel(get)
+    def diffract(self, a, a_d, dz):
+        self._fused_mam(a, a_d, *self._get_prop(dz)["P"])
 
-    @staticmethod
-    def fused_mam_kernel(shape):
-        h, w = shape
-        len_ = h * w
-        mam = SourceModule(f"""
-        #include "cuComplex.h"
-        #define LEN {len_}
-        __global__ void fmam(cuDoubleComplex *a, cuDoubleComplex *b,
-                             cuDoubleComplex *p00, cuDoubleComplex *p01,
-                             cuDoubleComplex *p10, cuDoubleComplex *p11)
-        {{
-            int index = threadIdx.x + blockIdx.x*blockDim.x;
-            cuDoubleComplex temp;
-            if (index < LEN)
-            {{
-                temp = cuCfma(a[index], p00[index], cuCmul(b[index], p01[index]));
-                b[index] = cuCfma(a[index], p10[index], cuCmul(b[index], p11[index]));
-                a[index] = temp;
-            }}
-        }}
-        """)
-        # mam = elementwise.ElementwiseKernel()
-        return mam.get_function('fmam')
-
-    @staticmethod
-    def ud_modify_kernel():
-        elementwise.ElementwiseKernel(
-            "double2 *u, double2 *ud, double n0, double mul",
-            "ud[i] = cuCsub(ud[i], make_cuDoubleComplex(u[i].x*mul,u[i].y*mul))",
-            preamble='#include "cuComplex.h"'
-        )
+    def scatter(self, u, u_d, n, dz):
+        self._get_prop(dz)["Q"](u, u_d, n)
 
     @staticmethod
     def conj(arr: gpuarray):
@@ -173,7 +141,35 @@ class _FFTFuncs:
                            arr.gpudata, arr.gpudata,
                            arr.mem_size)
 
-# def _evanescent_absorb(shape, res) -> np.ndarray:
+    def _get_prop(self, dz):
+        shape = self.shape
+        res = self.res
+        n0 = self.n0
+        key = round(dz * 1000)
+
+        try:
+            return self.__prop_cache[key]
+        except KeyError:
+            kz = _c_gamma(shape, res) * (2 * np.pi * res[2] * n0)
+            kz = kz.astype(np.complex128)
+            eva = np.exp(np.minimum((_c_gamma(shape, res) - 0.2) * 5, 0))
+            p_mat = [np.cos(kz * dz), np.sin(kz * dz) / kz,
+                     -np.sin(kz * dz) * kz, np.cos(kz * dz)]
+            p_mat = [thr.to_device(i * eva) for i in p_mat]
+            q_op = elementwise.ElementwiseKernel(
+                "double2 *u, double2 *ud, double *n_",
+                f"""
+                        temp = {(2 * np.pi * res[2]) ** 2 * dz} * n_[i] * ({2 * n0} + n_[i]);
+                        ud[i].x -= temp*u[i].x;
+                        ud[i].y -= temp*u[i].y;
+                        """,
+                loop_prep="double temp",
+            )
+            new_prop = {"P": p_mat, "Q": q_op}
+            self.__prop_cache[key] = new_prop
+            return new_prop
+
+# def _evanescent_absorb(shape, res):
 #     """
 #         For 0.98<N.A.<1, decrease to 1~1/e per step
 #

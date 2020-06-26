@@ -3,6 +3,7 @@ from tifffile import TiffWriter, TiffFile
 from warnings import warn
 import os
 import csv
+from pycuda import gpuarray
 
 DEFAULT_TYPE = np.float64
 
@@ -68,7 +69,7 @@ def np_read(path, dtype=DEFAULT_TYPE, *, key=None):
     return img.astype(dtype, copy=False)
 
 
-def csv_read(path: str, dtype=DEFAULT_TYPE, shape=None):
+def csv_read(path: str, dtype=DEFAULT_TYPE):
     table = []
     with open(path, 'r', newline='') as file:
         reader = csv.reader(file, quoting=csv.QUOTE_NONNUMERIC)
@@ -77,33 +78,38 @@ def csv_read(path: str, dtype=DEFAULT_TYPE, shape=None):
     return np.array(table, dtype)
 
 
-def read(source: str, dtype=DEFAULT_TYPE, shape=None, **kwargs):
+def read(source: str, dtype=DEFAULT_TYPE, shape=None, gpu=True, **kwargs):
     """
     Read a ``tf.Tensor`` from source. Method is auto-detected corresponding to the file extension.
 
     :param source:
     :param dtype:
     :param shape:
+    :param gpu:
     :return:
     """
     if source in {'plane'}:
-        img = predefined_read(source, shape, dtype)
+        arr = predefined_read(source, shape, dtype)
     elif os.access(source, os.R_OK):
         ext = os.path.splitext(source)[-1]
         if ext in {'.tiff', '.tif'}:
-            img = tiff_read(source, dtype, shape)
+            arr = tiff_read(source, dtype, shape)
         elif ext in {'.npy', '.npz'}:
-            img = np_read(source, dtype, shape, **kwargs)
+            arr = np_read(source, dtype, **kwargs)
         elif ext == '.csv':
-            img = csv_read(source, dtype, shape)
+            arr = csv_read(source, dtype)
         else:
             raise ValueError(f"unknown filename extension '{ext}'")
     else:
         raise FileNotFoundError(f"'{source}' is not a known illumination type nor a valid file path")
-    rank = len(img.shape)
+    if shape is not None and tuple(shape) != tuple(arr.shape):
+        arr = arr.reshape(shape)
+    rank = len(arr.shape)
     if rank not in {2, 3}:
-        warn(f"Importing {rank}-D image with shape {img.shape}", stacklevel=2)
-    return img
+        warn(f"Importing {rank}-D image with shape {arr.shape}", stacklevel=2)
+    if gpu:
+        arr = gpuarray.to_gpu(arr)
+    return arr
 
 
 def tiff_write(path, arr, *, scale=1, pre_operator: callable = None, dtype=np.uint16, compress: bool = True):
@@ -128,12 +134,13 @@ def tiff_write(path, arr, *, scale=1, pre_operator: callable = None, dtype=np.ui
     :param compress: Using lossless compression
     """
     arr = np.squeeze(arr)
+    if len(arr.shape) == 2:
+        arr = [arr]
+    elif len(arr.shape) != 3:
+        raise ValueError(f"Must export 2-D or 3-D array but got {len(arr.shape)}-D data, "
+                         f"shape {arr.shape}.")
     with TiffWriter(path) as out_file:
         for i in arr:
-
-            if len(i.shape) != 2:
-                raise ValueError(f"Must export a list of 2-D Tensors but got {len(i.shape)}-D data "
-                                 f"with shape as {i.shape}.")
             if pre_operator is not None:
                 i = pre_operator(i)
             try:
@@ -170,22 +177,27 @@ def csv_write(path: str, table):
             writer.writerow(row)
 
 
-def write(dest, tensor, **kwargs):
-    try:
-        arr = tensor.numpy()
-    except AttributeError as e:
-        try:
-            arr = np.array(tensor)
-        except Exception as ee:
-            raise TypeError(f"Must export numpy compatible Tensors but got {type(tensor)}") from ee
+def write(dest, array, **kwargs):
+    if isinstance(array, gpuarray.GPUArray):
+        arr = array.get()
+    else:
+        try:  # try array as iterator of GPUArray
+            arr = [page.get() for page in array]
+            arr = np.stack(arr)
+        except AttributeError:
+            try:
+                warn("use general numpy array fallback", stacklevel=2)
+                arr = np.array(array, copy=False)
+            except Exception as ee:
+                raise TypeError("unknown data type to write") from ee
 
     ext = os.path.splitext(dest)[-1]
     if ext in {'.tiff', '.tif'}:
-        tiff_write(dest, tensor, **kwargs)
+        tiff_write(dest, arr, **kwargs)
     elif ext in {'.npy', '.npz'}:
-        np_write(dest, tensor, **kwargs)
+        np_write(dest, arr, **kwargs)
     elif ext == '.csv':
-        csv_write(dest, tensor)
+        csv_write(dest, arr)
     else:
         raise ValueError(f"unknown filename extension '{ext}'")
 
