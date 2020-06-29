@@ -9,9 +9,6 @@ def ssnp_step(u: GPUArray, u_d: GPUArray, dz: float, n: GPUArray = None) -> tupl
 def pure_forward_d(u: GPUArray) -> GPUArray: ...
 
 
-def pure_forward_d2(u: GPUArray) -> GPUArray: ...
-
-
 def tilt(img: GPUArray, c_ab: tuple, *, trunc: bool = False, copy: bool = False): ...
 
 

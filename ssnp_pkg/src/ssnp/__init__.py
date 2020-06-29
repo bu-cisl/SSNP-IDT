@@ -25,5 +25,4 @@ VERSION = '0.0.1rc2'
 import pycuda
 import pycuda.autoinit
 from .data import read, write
-# from .tftool import real_to_complex, tilt
-from .calc import ssnp_step, tilt, pure_forward_d, binary_pupil, pure_forward_d2, merge_prop, split_prop
+from .calc import ssnp_step, tilt, pure_forward_d, binary_pupil, merge_prop, split_prop

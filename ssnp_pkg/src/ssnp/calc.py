@@ -1,4 +1,3 @@
-# import tensorflow as tf
 import numpy as np
 from pycuda import elementwise, gpuarray
 from reikna.fft import FFT
@@ -47,7 +46,7 @@ def ssnp_step(u, u_d, dz, n=None):
     return u, u_d
 
 
-def pure_forward_d(u):
+def pure_forward_d_old(u):
     """
     Calculate z partial derivative for a initial x-y complex amplitude in free
     (or homogeneous) space due to pure forward propagation.
@@ -63,7 +62,14 @@ def pure_forward_d(u):
     return u_d
 
 
-def pure_forward_d2(u):
+def pure_forward_d(u):
+    """
+    Calculate z partial derivative for a initial x-y complex amplitude in free
+    (or homogeneous) space due to pure forward propagation.
+
+    :param u: x-y complex amplitude
+    :return: z partial derivative of u
+    """
     funcs = get_funcs(u, _res_deprecated)
     af = funcs.fft(u, copy=True)
     ab = gpuarray.zeros_like(af)
