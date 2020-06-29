@@ -93,7 +93,7 @@ def read(source: str, dtype=DEFAULT_TYPE, shape=None, gpu=True, **kwargs):
     elif os.access(source, os.R_OK):
         ext = os.path.splitext(source)[-1]
         if ext in {'.tiff', '.tif'}:
-            arr = tiff_read(source, dtype, shape)
+            arr = tiff_read(source, dtype)
         elif ext in {'.npy', '.npz'}:
             arr = np_read(source, dtype, **kwargs)
         elif ext == '.csv':

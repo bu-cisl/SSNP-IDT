@@ -1,6 +1,6 @@
 from typing import Any, Tuple, Union, overload, Iterable
 import numpy as np
-from pycuda import gpuarray
+from pycuda.gpuarray import GPUArray
 
 DEFAULT_TYPE: type
 
@@ -18,9 +18,8 @@ def np_write(path, arr: np.ndarray, *, scale: float = 1., pre_operator: callable
              compress: bool = True): ...
 
 
-def read(source: str, dtype=np.float64, shape: Tuple[int] = None, *, key: str = None) -> np.ndarray: ...
+def read(source: str, dtype=np.float64, shape: Tuple[int] = None, gpu: bool = True,
+         **kwargs) -> Union[np.ndarray, GPUArray]: ...
 
 
-def write(dest: str, tensor: Union[gpuarray, Iterable], **kwargs): ...
-
-
+def write(dest: str, tensor: Union[GPUArray, Iterable], **kwargs): ...
