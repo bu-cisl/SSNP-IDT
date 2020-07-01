@@ -1,3 +1,5 @@
+import sys
+
 import numpy as np
 from tifffile import TiffWriter, TiffFile
 from warnings import warn
@@ -148,8 +150,8 @@ def tiff_write(path, arr, *, scale=1, pre_operator: callable = None, dtype=np.ui
                     i *= scale * {np.uint16: 65535, np.uint8: 255}[dtype]
                 i = i.astype(np.int64)
                 np.clip(i, 0, {np.uint16: 65535, np.uint8: 255}[dtype], out=i)
-            except KeyError as e:
-                raise TypeError(f"dtype should be either np.uint8 or np.uint16, but not {dtype}") from e
+            except KeyError:
+                raise TypeError(f"dtype should be either np.uint8 or np.uint16, but not {dtype}") from None
             i = i.astype(dtype)
             if compress:
                 out_file.save(i, compress=9, predictor=True)
@@ -157,7 +159,7 @@ def tiff_write(path, arr, *, scale=1, pre_operator: callable = None, dtype=np.ui
                 out_file.save(i)
 
 
-def np_write(path, arr, *, scale=1., pre_operator: callable = None, dtype=None, compress: bool = True):
+def np_write(path, arr, *, scale=1., pre_operator= None, dtype=None, compress=True):
     if pre_operator is not None:
         arr = pre_operator(arr)
     arr *= scale
@@ -168,6 +170,24 @@ def np_write(path, arr, *, scale=1., pre_operator: callable = None, dtype=None, 
         np.save(path, arr)
     elif ext == '.npz':
         np.savez_compressed(path, arr) if compress else np.savez(path, arr)
+
+
+def binary_write(path, arr, *, scale=1., pre_operator=None, dtype=None, add_hint=False):
+    if pre_operator is not None:
+        arr = pre_operator(arr)
+    arr *= scale
+    if dtype is not None:
+        arr = arr.astype(dtype)
+    if add_hint:
+        path = os.path.splitext(path)
+        path_list = [path[0]]
+        for i in arr.shape:
+            path_list.append(f"_{i}")
+        path_list.append(f"_{arr.dtype}")
+        path_list.append(f"_{sys.byteorder[0]}e")
+        path_list.append(path[1])
+        path = "".join(path_list)
+    arr.tofile(path)
 
 
 def csv_write(path: str, table):
@@ -198,6 +218,8 @@ def write(dest, array, **kwargs):
         np_write(dest, arr, **kwargs)
     elif ext == '.csv':
         csv_write(dest, arr)
+    elif ext == '.bin':
+        binary_write(dest, arr, **kwargs)
     else:
         raise ValueError(f"unknown filename extension '{ext}'")
 

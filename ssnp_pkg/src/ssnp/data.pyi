@@ -18,6 +18,10 @@ def np_write(path, arr: np.ndarray, *, scale: float = 1., pre_operator: callable
              compress: bool = True): ...
 
 
+def binary_write(path, arr: np.ndarray, *, scale=1., pre_operator: callable = None, dtype: type = None,
+                 add_hint: bool = False): ...
+
+
 def read(source: str, dtype=np.float64, shape: Tuple[int] = None, gpu: bool = True,
          **kwargs) -> Union[np.ndarray, GPUArray]: ...
 
