@@ -25,4 +25,4 @@ VERSION = '0.0.1rc3'
 import pycuda
 import pycuda.autoinit
 from .data import read, write
-from .calc import ssnp_step, bpm_step, tilt, pure_forward_d, merge_prop, split_prop
+from .calc import ssnp_step, bpm_step, tilt, pure_forward_d, binary_pupil, merge_prop, split_prop

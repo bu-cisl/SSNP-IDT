@@ -1,7 +1,7 @@
 import numpy as np
 from pycuda import gpuarray
-from pycuda.gpuarray import GPUArray
-from .funcs import Funcs, BPMFuncs, SSNPFuncs, _c_gamma
+from .funcs import BPMFuncs, SSNPFuncs
+# from warnings import warn
 
 _res_deprecated = (0.1, 0.1, 0.1)
 _N0_deprecated = 1
@@ -35,10 +35,6 @@ def ssnp_step(u, u_d, dz, n=None):
     # n = n / N0
     if n is not None:
         funcs.scatter(u, u_d, n, dz)
-    # if not PERIODIC_BOUNDARY:
-    #     absorb = tf.constant(_outflow_absorb(), DATA_TYPE)
-    #     u *= absorb
-    #     u_d *= absorb
     return u, u_d
 
 
@@ -67,36 +63,34 @@ def bpm_step(u, dz, n=None):
     return u
 
 
-# def pure_forward_d_old(u):
-#     """
-#     Calculate z partial derivative for a initial x-y complex amplitude in free
-#     (or homogeneous) space due to pure forward propagation.
-#
-#     :param u: x-y complex amplitude
-#     :return: z partial derivative of u
-#     """
-#     funcs = get_funcs(u, _res_deprecated)
-#     i_kz = gpuarray.to_gpu(funcs.kz * 1j)
-#     a = funcs.fft(u, copy=True)
-#     a *= i_kz
-#     u_d = funcs.ifft(a)
-#     return u_d
+def binary_pupil(u, na):
+    funcs = get_funcs(u, _res_deprecated, model="any")
+    funcs.binary_pupil(u, na)
 
 
-def pure_forward_d(u):
+def pure_forward_d(u, out=None):
     """
     Calculate z partial derivative for a initial x-y complex amplitude in free
     (or homogeneous) space due to pure forward propagation.
 
     :param u: x-y complex amplitude
+    :param out: (optional) output memory, must have same shape and dtype
     :return: z partial derivative of u
     """
     funcs = get_funcs(u, _res_deprecated, model="ssnp")
-    af = funcs.fft(u, copy=True)
-    ab = gpuarray.zeros_like(af)
+    af = funcs.fft(u, output=funcs.get_temp_mem(u))
+    if out is None:
+        ab = gpuarray.zeros_like(af)
+    else:
+        if out.shape != u.shape or out.dtype != u.dtype:
+            raise ValueError("incompatible output memory")
+        ab = out
+        zero = np.zeros((), u.dtype)
+        ab.fill(zero)
+    # Variables: af = fft(u), ab = 0, u is not changed
     funcs.merge_prop_kernel(af, ab, funcs.kz_gpu)
-    u_d = funcs.ifft(ab)
-    return u_d
+    ud = funcs.ifft(ab)
+    return ud
 
 
 def merge_prop(uf, ub, copy=False):
@@ -119,9 +113,6 @@ def split_prop(u, u_d, copy=False):
     uf = funcs.ifft(a)
     ud = funcs.ifft(a_d)
     return uf, ud
-
-
-
 
 
 def tilt(img, c_ab, *, trunc=False, copy=False):
@@ -150,15 +141,24 @@ def tilt(img, c_ab, *, trunc=False, copy=False):
     return img, c_ab
 
 
-def get_funcs(arr_like: GPUArray, res, model="ssnp"):
+def get_funcs(arr_like, res, model):
     global __funcs_cache
     model = model.lower()
-    key = (tuple(arr_like.shape), tuple(res), model)
+    shape = tuple(arr_like.shape)
+    res = tuple(res)
+    if model == "any":
+        try:
+            key = (shape, res, "ssnp")
+            return __funcs_cache[key]
+        except KeyError:
+            return get_funcs(arr_like, res, "bpm")
+
+    key = (shape, res, model)
     try:
         return __funcs_cache[key]
     except KeyError:
         try:
-            model = {"ssnp": SSNPFuncs, "bpm": BPMFuncs, "general": Funcs}[model]
+            model = {"ssnp": SSNPFuncs, "bpm": BPMFuncs}[model]
             funcs = model(arr_like, res, _N0_deprecated)
         except KeyError:
             raise ValueError(f"unknown model {model}") from None

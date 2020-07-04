@@ -80,13 +80,14 @@ def csv_read(path: str, dtype=DEFAULT_TYPE):
     return np.array(table, dtype)
 
 
-def read(source: str, dtype=DEFAULT_TYPE, shape=None, gpu=True, **kwargs):
+def read(source: str, dtype=DEFAULT_TYPE, shape=None, *, scale=1., gpu=True, **kwargs):
     """
     Read a ``tf.Tensor`` from source. Method is auto-detected corresponding to the file extension.
 
     :param source:
     :param dtype:
     :param shape:
+    :param scale:
     :param gpu:
     :return:
     """
@@ -109,6 +110,7 @@ def read(source: str, dtype=DEFAULT_TYPE, shape=None, gpu=True, **kwargs):
     rank = len(arr.shape)
     if rank not in {2, 3}:
         warn(f"Importing {rank}-D image with shape {arr.shape}", stacklevel=2)
+    arr *= scale
     if gpu:
         arr = gpuarray.to_gpu(arr)
     return arr
@@ -159,7 +161,7 @@ def tiff_write(path, arr, *, scale=1, pre_operator: callable = None, dtype=np.ui
                 out_file.save(i)
 
 
-def np_write(path, arr, *, scale=1., pre_operator= None, dtype=None, compress=True):
+def np_write(path, arr, *, scale=1., pre_operator=None, dtype=None, compress=True):
     if pre_operator is not None:
         arr = pre_operator(arr)
     arr *= scale

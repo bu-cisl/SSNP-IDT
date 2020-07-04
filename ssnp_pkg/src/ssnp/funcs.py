@@ -29,52 +29,51 @@ def _c_gamma(shape, res):
 
 
 class Funcs:
-    def __init__(self, arr_like: GPUArray, res, n0):
-        shape = arr_like.shape
-        self.fft_callable = FFT(arr_like).compile(thr)
+    __temp_memory_pool = {}
+
+    def __init__(self, arr_like, res, n0):
+        shape = tuple(arr_like.shape)
+        self._fft_callable = FFT(arr_like).compile(thr)
         self.shape = shape
         self._prop_cache = {}
         self._pupil_cache = {}
         self.res = res
         self.n0 = n0
-        kz = _c_gamma(self.shape, res) * (2 * np.pi * res[2] * n0)
-        self.kz: np.ndarray = kz.astype(np.double)
-        self.kz_gpu: GPUArray = gpuarray.to_gpu(kz)
-        self.eva: np.ndarray = np.exp(np.minimum((_c_gamma(shape, res) - 0.2) * 5, 0))
+        kz = _c_gamma(shape, res) * (2 * np.pi * res[2] * n0)
+        self.kz = kz.astype(np.double)
+        self.kz_gpu = gpuarray.to_gpu(kz)
+        self.eva = np.exp(np.minimum((_c_gamma(shape, res) - 0.2) * 5, 0))
 
-    def fft(self, arr: GPUArray, copy=False):
-        if copy:
+    def fft(self, arr, output=None, copy=False, inverse=False):
+        if output is not None:
+            o = output
+        elif copy:
             o = gpuarray.empty_like(arr)
         else:
             o = arr
-        self.fft_callable(o, arr)
+        self._fft_callable(o, arr, inverse=inverse)
         return o
 
-    def ifft(self, arr: GPUArray, copy=False):
-        if copy:
-            o = gpuarray.empty_like(arr)
-        else:
-            o = arr
-        self.fft_callable(o, arr, inverse=True)
-        return o
+    def ifft(self, *args, **kwargs):
+        return self.fft(*args, **kwargs, inverse=True)
 
-    def ifft_old(self, arr: GPUArray, copy=False):
-        w, d = arr.shape
-        if copy:
-            o = arr.copy()
-        else:
-            o = arr
-        Funcs.conj(o)
-        o /= w * d
-        self.fft_callable(o, o)
-        Funcs.conj(o)
-        return o
+    # def ifft_old(self, arr: GPUArray, copy=False):
+    #     w, d = arr.shape
+    #     if copy:
+    #         o = arr.copy()
+    #     else:
+    #         o = arr
+    #     Funcs.conj(o)
+    #     o /= w * d
+    #     self._fft_callable(o, o)
+    #     Funcs.conj(o)
+    #     return o
 
     def diffract(self, *args):
-        pass
+        raise NotImplementedError
 
     def scatter(self, *args):
-        pass
+        raise NotImplementedError
 
     def binary_pupil(self, u, na):
         key = round(na * 1000)
@@ -101,6 +100,15 @@ class Funcs:
                            arr.gpudata, arr.gpudata,
                            arr.mem_size)
 
+    @staticmethod
+    def get_temp_mem(arr_like: GPUArray, index=0):
+        key = (arr_like.shape, arr_like.dtype, index)
+        try:
+            return Funcs.__temp_memory_pool[key]
+        except KeyError:
+            mem = gpuarray.empty_like(arr_like)
+            Funcs.__temp_memory_pool[key] = mem
+            return mem
 
 #     """
 #         For 0.98<N.A.<1, decrease to 1~1/e per step
@@ -109,6 +117,7 @@ class Funcs:
 #
 #         :return: a 2D angular spectrum transmittance numpy array
 #     """
+
 
 class SSNPFuncs(Funcs):
     __fused_mam_callable = elementwise.ElementwiseKernel(

@@ -1,4 +1,4 @@
-from typing import Any, Tuple, Union, overload, Iterable
+from typing import Any, Tuple, Union, Iterable
 import numpy as np
 from pycuda.gpuarray import GPUArray
 
@@ -22,8 +22,8 @@ def binary_write(path, arr: np.ndarray, *, scale=1., pre_operator: callable = No
                  add_hint: bool = False): ...
 
 
-def read(source: str, dtype=np.float64, shape: Tuple[int] = None, gpu: bool = True,
-         **kwargs) -> Union[np.ndarray, GPUArray]: ...
+def read(source: str, dtype=np.float64, shape: Tuple[int] = None, *, scale: float = 1.,
+         gpu: bool = True, **kwargs) -> Union[np.ndarray, GPUArray]: ...
 
 
 def write(dest: str, tensor: Union[GPUArray, Iterable], **kwargs): ...
