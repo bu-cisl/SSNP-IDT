@@ -18,13 +18,17 @@ def ssnp_step(u, u_d, dz, n=None):
     :param n: refractive index along x-y distribution in this slice. Use background N0 if not provided.
     :return: new (u, u_d) after a step towards +z direction
     """
+    assert isinstance(u, gpuarray.GPUArray)
+    assert isinstance(u_d, gpuarray.GPUArray)
+    if n is not None:
+        assert isinstance(n, gpuarray.GPUArray)
     shape = u.shape
     try:
         assert u_d.shape == shape, f"u_d shape {u_d.shape}"
         if n is not None:
             assert n.shape == shape, f"n shape {n.shape}"
     except AssertionError as name:
-        raise ValueError(f"cannot match {name} with u shape {shape}")
+        raise ValueError(f"cannot match {name} with u shape {shape}") from None
     funcs: SSNPFuncs = get_funcs(u, _res_deprecated, model="ssnp")
 
     a = funcs.fft(u)
@@ -113,32 +117,6 @@ def split_prop(u, u_d, copy=False):
     uf = funcs.ifft(a)
     ud = funcs.ifft(a_d)
     return uf, ud
-
-
-def tilt(img, c_ab, *, trunc=False, copy=False):
-    """
-    Tilt an image as illumination
-
-    :param copy:
-    :param img: Amplitude graph
-    :param c_ab: (cos(alpha), cos(beta))
-    :param trunc: whether trunc to a grid point in Fourier plane
-    :return: complex tf Tensor of input field
-    """
-    size = img.shape[::-1]
-    if len(size) != 2:
-        raise ValueError(f"Illumination should be a 2-D tensor rather than shape '{img.shape}'.")
-    norm = [size[i] * _res_deprecated[i] * _N0_deprecated for i in (0, 1)]
-    if trunc:
-        c_ab = [np.trunc(c_ab[i] * norm[i]) / norm[i] for i in (0, 1)]
-    xr, yr = [np.arange(size[i]) / size[i] * c_ab[i] * norm[i] for i in (0, 1)]
-    phase = np.mod(xr + yr[:, None], 1).astype(np.double) * 2 * np.pi
-    phase = gpuarray.to_gpu(np.exp(1j * phase))
-    if copy:
-        img = img * phase
-    else:
-        img *= phase
-    return img, c_ab
 
 
 def get_funcs(arr_like, res, model):
