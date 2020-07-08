@@ -2,6 +2,7 @@ import sys
 
 import numpy as np
 from tifffile import TiffWriter, TiffFile
+from scipy.io import loadmat, whosmat
 from warnings import warn
 import os
 import csv
@@ -14,7 +15,7 @@ DEFAULT_TYPE = np.float64
 #     raise ValueError(f"Input image size {raw_img.shape} is incompatible"
 #                      f"with x-y size {SIZE[:2]}")
 
-def predefined_read(name, shape, dtype=DEFAULT_TYPE):
+def predefined_read(name, shape, dtype=None):
     """
     Get a predefined tensor
     ``shape`` can be a ``list`` of integers, a ``tuple`` of integers,
@@ -33,12 +34,11 @@ def predefined_read(name, shape, dtype=DEFAULT_TYPE):
     return img
 
 
-def tiff_read(path, dtype=DEFAULT_TYPE):
+def tiff_read(path):
     """
     Import a TIFF file to ``tf.Tensor``
 
     :param path: Target file path
-    :param dtype: Data type of the elements of the resulting tensor
     :return: A tensor constant
     """
     with TiffFile(path) as file:
@@ -50,10 +50,10 @@ def tiff_read(path, dtype=DEFAULT_TYPE):
         img = img.astype(np.double) / 255
     else:
         raise TypeError(f"Unknown data type {img.dtype.type} of input image")
-    return img.astype(dtype, copy=False)
+    return img
 
 
-def np_read(path, dtype=DEFAULT_TYPE, *, key=None):
+def np_read(path, *, key=None):
     ext = os.path.splitext(path)[-1]
     if key is None:
         key = 'arr_0'
@@ -68,27 +68,36 @@ def np_read(path, dtype=DEFAULT_TYPE, *, key=None):
                 img = f[f.files[0]]
     else:
         raise ValueError(f"unknown filename extension '{ext}'")
-    return img.astype(dtype, copy=False)
+    return img
 
 
-def csv_read(path: str, dtype=DEFAULT_TYPE):
+def csv_read(path: str):
     table = []
     with open(path, 'r', newline='') as file:
         reader = csv.reader(file, quoting=csv.QUOTE_NONNUMERIC)
         for row in reader:
             table.append(row)
-    return np.array(table, dtype)
+    return np.array(table)
 
 
-def read(source: str, dtype=DEFAULT_TYPE, shape=None, *, scale=1., gpu=True, **kwargs):
+def mat_read(path, *, key=None):
+    if key is None:
+        key = whosmat(path)[0][0]
+    img = loadmat(path)[key]
+    if not isinstance(img, np.ndarray):
+        raise TypeError(f"Unknown data type {type(img)} of input image")
+    return img
+
+
+def read(source, dtype=None, shape=None, *, scale=1., gpu=True, **kwargs):
     """
     Read a ``tf.Tensor`` from source. Method is auto-detected corresponding to the file extension.
 
-    :param source:
-    :param dtype:
+    :param source: Target file path
+    :param dtype: Data type of the elements of the resulting tensor
     :param shape:
     :param scale:
-    :param gpu:
+    :param gpu: whether load memory to gpu
     :return:
     """
     if source in {'plane'}:
@@ -96,13 +105,18 @@ def read(source: str, dtype=DEFAULT_TYPE, shape=None, *, scale=1., gpu=True, **k
     elif os.access(source, os.R_OK):
         ext = os.path.splitext(source)[-1]
         if ext in {'.tiff', '.tif'}:
-            arr = tiff_read(source, dtype)
+            arr = tiff_read(source)
         elif ext in {'.npy', '.npz'}:
-            arr = np_read(source, dtype, **kwargs)
+            arr = np_read(source, **kwargs)
+        elif ext == '.mat':
+            arr = mat_read(source, **kwargs)
         elif ext == '.csv':
-            arr = csv_read(source, dtype)
+            arr = csv_read(source)
         else:
             raise ValueError(f"unknown filename extension '{ext}'")
+        if dtype is not None:
+            arr = arr.astype(dtype, copy=False)
+
     else:
         raise FileNotFoundError(f"'{source}' is not a known illumination type nor a valid file path")
     if shape is not None and tuple(shape) != tuple(arr.shape):
@@ -200,15 +214,19 @@ def csv_write(path: str, table):
 
 
 def write(dest, array, **kwargs):
-    if isinstance(array, gpuarray.GPUArray):
+    if isinstance(array, np.ndarray):
+        arr = array
+    elif isinstance(array, gpuarray.GPUArray):
         arr = array.get()
     else:
-        try:  # try array as iterator of GPUArray
-            arr = [page.get() for page in array]
+        arr = [page for page in array]
+        if isinstance(arr[0], np.ndarray):
             arr = np.stack(arr)
-        except AttributeError:
+        elif isinstance(arr[0], gpuarray.GPUArray):
+            arr = np.stack([gpu_arr.get() for gpu_arr in arr])
+        else:
             try:
-                warn("use general numpy array fallback", stacklevel=2)
+                warn("trying general np.array fallback", stacklevel=2)
                 arr = np.array(array, copy=False)
             except Exception as ee:
                 raise TypeError("unknown data type to write") from ee

@@ -5,7 +5,7 @@ from pycuda import gpuarray
 from pycuda.gpuarray import GPUArray
 from warnings import warn
 from .calc import split_prop as calc_split, merge_prop as calc_merge, pure_forward_d
-from .calc import ssnp_step, bpm_step, binary_pupil
+from .calc import ssnp_step, bpm_step, binary_pupil as calc_pupil
 
 
 class BeamArray:
@@ -120,6 +120,11 @@ class BeamArray:
             self._u2 = None
         self._parse(lambda var_dz, var_n: bpm_step(self._u1, var_dz, var_n),
                     dz, n)
+
+    def binary_pupil(self, na):
+        calc_pupil(self._u1, na)
+        if self._u2 is not None:
+            calc_pupil(self._u2, na)
 
     @staticmethod
     def _parse(func, dz, n):

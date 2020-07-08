@@ -22,12 +22,11 @@ for num in range(8):
     c_ab = NA * np.cos(xy_theta), NA * np.sin(xy_theta)
     u = ssnp.read("plane", np.complex128, shape=n.shape[1:])
     u, c_ab_trunc = ssnp.tilt(u, c_ab, trunc=True)
-    u_d = ssnp.pure_forward_d(u)
-
-    for i in range(len(n)):
-        ssnp.ssnp_step(u, u_d, 1, n[i])
-    ssnp.ssnp_step(u, u_d, -len(n) / 2)
-    ssnp.split_prop(u, u_d)
+    beam = ssnp.BeamArray(u)
+    beam.set_pure_forward()
+    beam.ssnp(1, n)
+    beam.ssnp(-len(n) / 2)
+    u = beam.forward
     ssnp.binary_pupil(u, 0.6501)
     steps.append(u.get())
 print(time() - t)
