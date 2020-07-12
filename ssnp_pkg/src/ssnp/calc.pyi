@@ -1,11 +1,22 @@
 from typing import Tuple, Literal
 from pycuda.gpuarray import GPUArray
+import numpy as np
 
 
-def ssnp_step(u: GPUArray, u_d: GPUArray, dz: float, n: GPUArray = None, output: GPUArray = None) -> Tuple[GPUArray, GPUArray]: ...
+def ssnp_step(u: GPUArray, u_d: GPUArray, dz: float, n: GPUArray = None, output: GPUArray = None) -> Tuple[
+    GPUArray, GPUArray]: ...
 
 
 def bpm_step(u: GPUArray, dz: float, n: GPUArray = None, output: GPUArray = None) -> GPUArray: ...
+
+
+def bpm_grad_bp(u, ug, dz, n=None, ng=None) -> GPUArray: ...
+
+
+def reduce_mse(u: GPUArray, measurement: GPUArray) -> np.double: ...
+
+
+def reduce_mse_grad(u: GPUArray, measurement: GPUArray, output: GPUArray=None) -> GPUArray: ...
 
 
 def pure_forward_d(u: GPUArray, output: GPUArray = None) -> GPUArray: ...

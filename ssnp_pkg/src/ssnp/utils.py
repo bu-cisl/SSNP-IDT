@@ -27,3 +27,21 @@ def tilt(img, c_ab, *, trunc=False, copy=False):
     else:
         img *= phase
     return img, c_ab
+
+
+def param_check(**kwargs):
+    name0 = None
+    shape0 = None
+    for name in kwargs:
+        arr = kwargs[name]
+        if arr is None:
+            continue
+        # type check
+        assert isinstance(arr, gpuarray.GPUArray)
+        # shape check
+        if name0 is None:
+            name0 = name
+            shape0 = arr.shape
+        else:
+            if arr.shape != shape0:
+                raise ValueError(f"cannot match '{name}' shape {arr.shape} with '{name0}' shape {shape0}")

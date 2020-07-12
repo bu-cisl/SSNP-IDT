@@ -1,3 +1,5 @@
+from typing import Callable
+
 import numpy as np
 from pycuda.gpuarray import GPUArray
 from pycuda.elementwise import ElementwiseKernel
@@ -34,13 +36,29 @@ class Funcs:
     @staticmethod
     def get_temp_mem(arr_like: GPUArray, index=0): ...
 
+    @staticmethod
+    def reduce_mse_cr(u: GPUArray, m: GPUArray) -> GPUArray: ...
+
+    @staticmethod
+    def reduce_mse_cc(u: GPUArray, m: GPUArray) -> GPUArray: ...
+
+    @staticmethod
+    def mse_cr_grad(u: GPUArray, m: GPUArray, out: GPUArray): ...
+
+    @staticmethod
+    def mse_cc_grad(u: GPUArray, m: GPUArray, out: GPUArray): ...
+
 
 class BPMFuncs(Funcs):
     def _get_prop(self, dz): ...
 
     def diffract(self, a, dz) -> None: ...
 
+    def diffract_g(self, ag, dz): ...
+
     def scatter(self, u, n, dz) -> None: ...
+
+    def scatter_g(self, u, n, ug, ng, dz): ...
 
 
 class SSNPFuncs(Funcs):

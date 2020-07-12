@@ -1,12 +1,14 @@
-import numpy as np
-from pycuda import gpuarray
-from .funcs import BPMFuncs, SSNPFuncs
-# from warnings import warn
-
 _res_deprecated = (0.1, 0.1, 0.1)
 _N0_deprecated = 1
 __funcs_cache = {}
 
+import numpy as np
+from pycuda import gpuarray
+from .funcs import BPMFuncs, SSNPFuncs, Funcs
+from .utils import param_check
+
+
+# from warnings import warn
 
 def ssnp_step(u, u_d, dz, n=None, output=None):
     """
@@ -19,19 +21,8 @@ def ssnp_step(u, u_d, dz, n=None, output=None):
     :param output:
     :return: new (u, u_d) after a step towards +z direction
     """
-    assert isinstance(u, gpuarray.GPUArray)
-    assert isinstance(u_d, gpuarray.GPUArray)
-    if n is not None:
-        assert isinstance(n, gpuarray.GPUArray)
-    shape = u.shape
-    try:
-        assert u_d.shape == shape, f"u_d shape {u_d.shape}"
-        if n is not None:
-            assert n.shape == shape, f"n shape {n.shape}"
-    except AssertionError as name:
-        raise ValueError(f"cannot match {name} with u shape {shape}") from None
+    param_check(u=u, u_d=u_d, n=n)
     funcs: SSNPFuncs = get_funcs(u, _res_deprecated, model="ssnp")
-
     a = funcs.fft(u, output=output)
     a_d = funcs.fft(u_d, output=output)
     funcs.diffract(a, a_d, dz)
@@ -53,10 +44,7 @@ def bpm_step(u, dz, n=None, output=None):
     :param output:
     :return: new (u, u_d) after a step towards +z direction
     """
-    shape = u.shape
-    if n is not None:
-        if n.shape != shape:
-            raise ValueError(f"cannot match n shape {n.shape} with u shape {shape}")
+    param_check(u=u, n=n, output=output)
     funcs: BPMFuncs = get_funcs(u, _res_deprecated, model="bpm")
     a = funcs.fft(u, output=output)
     funcs.diffract(a, dz)
@@ -67,6 +55,45 @@ def bpm_step(u, dz, n=None, output=None):
     #     absorb = tf.constant(_outflow_absorb(), DATA_TYPE)
     #     u *= absorb
     return u
+
+
+def bpm_grad_bp(u, ug, dz, n=None, ng=None):
+    param_check(u_1=u, ug=ug, n=n, ng=ng)
+    funcs: BPMFuncs = get_funcs(ug, _res_deprecated, model="bpm")
+    if n is not None:
+        funcs.scatter_g(u, n, ug, ng, dz)
+    ag = funcs.fft(ug)
+    funcs.diffract_g(ag, dz)
+    funcs.ifft(ag)
+    return ng
+
+
+def reduce_mse(u, measurement):
+    param_check(u=u, measurement=measurement)
+    if u.dtype != np.complex128:
+        raise ValueError(f"u dtype {u.dtype} is incompatible")
+    if measurement.dtype == np.complex128:
+        result = Funcs.reduce_mse_cc(u, measurement)
+    elif measurement.dtype == np.double:
+        result = Funcs.reduce_mse_cr(u, measurement)
+    else:
+        raise ValueError(f"measurement dtype {measurement.dtype} is incompatible")
+    return result.get()
+
+
+def reduce_mse_grad(u, measurement, output=None):
+    param_check(u=u, measurement=measurement, output=output)
+    if u.dtype != np.complex128:
+        raise ValueError(f"u dtype {u.dtype} is incompatible")
+    if output is None:
+        output = gpuarray.empty_like(u)
+    if measurement.dtype == np.complex128:
+        Funcs.mse_cc_grad(u, measurement, output)
+    elif measurement.dtype == np.double:
+        Funcs.mse_cr_grad(u, measurement, output)
+    else:
+        raise ValueError(f"measurement dtype {measurement.dtype} is incompatible")
+    return output
 
 
 def binary_pupil(u, na):
@@ -88,7 +115,8 @@ def pure_forward_d(u, output=None):
     if output is None:
         ab = gpuarray.zeros_like(af)
     else:
-        if output.shape != u.shape or output.dtype != u.dtype:
+        param_check(u=u, output=output)
+        if output.dtype != u.dtype:
             raise ValueError("incompatible output memory")
         ab = output
         zero = np.zeros((), u.dtype)
@@ -100,7 +128,7 @@ def pure_forward_d(u, output=None):
 
 
 def merge_prop(uf, ub, copy=False):
-    assert uf.shape == ub.shape
+    param_check(uf=uf, ub=ub)
     funcs = get_funcs(uf, _res_deprecated, model="ssnp")
     af = funcs.fft(uf, copy=copy)
     ab = funcs.fft(ub, copy=copy)
@@ -111,7 +139,7 @@ def merge_prop(uf, ub, copy=False):
 
 
 def split_prop(u, u_d, copy=False):
-    assert u.shape == u_d.shape
+    param_check(u=u, u_d=u_d)
     funcs = get_funcs(u, _res_deprecated, model="ssnp")
     a = funcs.fft(u, copy=copy)
     a_d = funcs.fft(u_d, copy=copy)

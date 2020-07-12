@@ -1,4 +1,4 @@
-from pycuda import elementwise, gpuarray, driver
+from pycuda import elementwise, gpuarray, driver, reduction
 from pycuda.gpuarray import GPUArray
 from reikna.fft import FFT
 import numpy as np
@@ -30,6 +30,37 @@ def _c_gamma(shape, res):
 
 class Funcs:
     __temp_memory_pool = {}
+    reduce_mse_cr = reduction.ReductionKernel(
+        dtype_out=np.double, neutral=0,
+        reduce_expr="a+b",
+        map_expr="(cuCabs(x[i]) - y[i]) * (cuCabs(x[i]) - y[i])",
+        arguments="double2 *x, double *y",
+        preamble='#include "cuComplex.h"'
+    )
+    reduce_mse_cc = reduction.ReductionKernel(
+        dtype_out=np.double, neutral=0,
+        reduce_expr="a+b",
+        map_expr="cuCabs(cuCsub(x[i], y[i])) * cuCabs(cuCsub(x[i], y[i]))",
+        arguments="double2 *x, double2 *y",
+        preamble='#include "cuComplex.h"'
+    )
+    mse_cc_grad = elementwise.ElementwiseKernel(
+        "double2 *u, double2 *m, double2 *out",
+        """
+        out[i] = cuCsub(u[i], m[i]);
+        out[i].x *= 2; out[i].y *= 2;
+        """,
+        preamble='#include "cuComplex.h"'
+    )
+    mse_cr_grad = elementwise.ElementwiseKernel(
+        "double2 *u, double *m, double2 *out",
+        """
+        temp = 2 * (1 - m[i] / cuCabs(u[i]));
+        out[i].x = temp * u[i].x; out[i].y = temp * u[i].y;
+        """,
+        loop_prep="double temp",
+        preamble='#include "cuComplex.h"'
+    )
 
     def __init__(self, arr_like, res, n0):
         shape = tuple(arr_like.shape)
@@ -109,6 +140,15 @@ class Funcs:
             mem = gpuarray.empty_like(arr_like)
             Funcs.__temp_memory_pool[key] = mem
             return mem
+
+    # @staticmethod
+    # def reduce_mse_cr(arr1, arr2):
+    #     Funcs.__mse_cr_kernel(arr1, arr2)
+    #
+    # @staticmethod
+    # def reduce_mse_cc(arr1, arr2):
+    #     Funcs.__mse_cc_kernel(arr1, arr2)
+
 
 #     """
 #         For 0.98<N.A.<1, decrease to 1~1/e per step
@@ -199,7 +239,7 @@ class BPMFuncs(Funcs):
         except KeyError:
             kz = self.kz.astype(np.complex128)
             eva = self.eva
-            p_mat = np.exp(kz * (1j * dz)) * eva
+            p_mat = np.exp(kz * (1j * dz))
             p_mat = gpuarray.to_gpu(p_mat * eva)
             phase_factor = 2 * np.pi * res[2] * n0 * dz
             q_op = elementwise.ElementwiseKernel(
@@ -211,12 +251,30 @@ class BPMFuncs(Funcs):
                 loop_prep="double2 temp",
                 preamble='#include "cuComplex.h"'
             )
-            new_prop = {"P": p_mat, "Q": q_op}
+            q_op_g = elementwise.ElementwiseKernel(
+                "double2 *u, double *n_, double2 *ug, double *n_g",
+                # Forward: u=u*temp
+                f"""
+                    temp_conj = make_cuDoubleComplex(cos(n_[i] * {phase_factor}), -sin(n_[i] * {phase_factor}));
+                    n_g[i] = {phase_factor} * 
+                        (cuCimag(ug[i]) * cuCreal(u[i]) - cuCimag(u[i]) * cuCreal(ug[i]));
+                    ug[i] = cuCmul(ug[i], temp_conj);
+                """,
+                loop_prep="double2 temp_conj",
+                preamble='#include "cuComplex.h"'
+            )
+            new_prop = {"P": p_mat, "Pg": p_mat.conj(), "Q": q_op, "Qg": q_op_g}
             self._prop_cache[key] = new_prop
             return new_prop
 
     def diffract(self, a, dz):
         a *= self._get_prop(dz)["P"]
 
+    def diffract_g(self, ag, dz):
+        ag *= self._get_prop(dz)["Pg"]
+
     def scatter(self, u, n, dz):
         self._get_prop(dz)["Q"](u, n)
+
+    def scatter_g(self, u, n, ug, ng, dz):
+        self._get_prop(dz)["Qg"](u, n, ug, ng)
