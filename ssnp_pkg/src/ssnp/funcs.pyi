@@ -4,9 +4,10 @@ import numpy as np
 from pycuda.gpuarray import GPUArray
 from pycuda.elementwise import ElementwiseKernel
 from reikna.core.computation import ComputationCallable
+from .utils import Multipliers
 
 
-def _c_gamma(shape, res) -> np.ndarray: ...
+# def _c_gamma(shape, res) -> np.ndarray: ...
 
 
 class Funcs:
@@ -16,10 +17,10 @@ class Funcs:
     kz: np.ndarray
     kz_gpu: GPUArray
     eva: np.ndarray
+    multiplier: Multipliers
     _fft_callable: ComputationCallable
     __temp_memory_pool: dict
     _prop_cache: dict
-    _pupil_cache: dict
 
     def __init__(self, arr_like: GPUArray, res, n0): ...
 
@@ -30,8 +31,6 @@ class Funcs:
     def diffract(self, *args) -> None: ...
 
     def scatter(self, *args) -> None: ...
-
-    def binary_pupil(self, u: GPUArray, na: float) -> GPUArray: ...
 
     @staticmethod
     def get_temp_mem(arr_like: GPUArray, index=0): ...
@@ -48,6 +47,9 @@ class Funcs:
     @staticmethod
     def mse_cc_grad(u: GPUArray, m: GPUArray, out: GPUArray): ...
 
+    @staticmethod
+    def mul_grad_bp(ug: GPUArray, mul: GPUArray): ...
+
 
 class BPMFuncs(Funcs):
     def _get_prop(self, dz): ...
@@ -63,6 +65,12 @@ class BPMFuncs(Funcs):
 
 class SSNPFuncs(Funcs):
     __fused_mam_callable: ElementwiseKernel
+
+    @staticmethod
+    def merge_prop_kernel(af, ab, kz): ...
+
+    @staticmethod
+    def split_prop_kernel(a, a_d, kz): ...
 
     def _get_prop(self, dz): ...
 

@@ -93,9 +93,25 @@ def reduce_mse_grad(u, measurement, output=None):
     return output
 
 
-def binary_pupil(u, na):
+def binary_pupil(u, na, multiplier=None):
     funcs = get_funcs(u, config.res, model="any")
-    funcs.binary_pupil(u, na)
+    a = funcs.fft(u)
+    if multiplier is None:
+        a *= funcs.multiplier.binary_pupil(na, gpu=True)
+    else:
+        a *= multiplier.binary_pupil(na, gpu=True)
+    return funcs.ifft(a)
+
+
+def get_multiplier(arr_like):
+    funcs = get_funcs(arr_like, config.res, model="any")
+    return funcs.multiplier
+
+
+def u_mul_grad_bp(ug, mul):
+    funcs = get_funcs(ug, config.res, model="any")
+    funcs.mul_grad_bp(ug, mul)
+    return ug
 
 
 def pure_forward_d(u, output=None):

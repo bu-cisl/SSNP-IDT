@@ -1,6 +1,7 @@
 from pycuda.gpuarray import GPUArray
 from typing import Literal, Optional, List, Union
 import numpy as np
+from .utils import Multipliers
 
 
 class TrackStack:
@@ -19,6 +20,7 @@ class BeamArray:
     backward: Union[Optional[GPUArray], property]
     field: Union[GPUArray, property]
     derivative: Union[Optional[GPUArray], property]
+    multiplier: Multipliers
     _array_pool: List[GPUArray, ...]
 
     _history: list
@@ -28,15 +30,17 @@ class BeamArray:
 
     def _parse(self, info, dz, n, track: bool): ...
 
-    def ssnp(self, dz, n: GPUArray = None, track: bool = False): ...
+    def ssnp(self, dz, n: GPUArray = None, *, track: bool = False): ...
 
-    def bpm(self, dz, n: GPUArray = None, track: bool = False): ...
+    def bpm(self, dz, n: GPUArray = None, *, track: bool = False): ...
 
     def forward_mse_loss(self, measurement: GPUArray, *, track: bool = False): ...
 
     def n_grad(self, output: GPUArray = None) -> GPUArray: ...
 
     def binary_pupil(self, na: float): ...
+
+    def mul(self, arr: GPUArray, *, track=False): ...
 
     def split_prop(self): ...
 

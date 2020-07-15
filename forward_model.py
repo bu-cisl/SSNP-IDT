@@ -23,15 +23,14 @@ beam = ssnp.BeamArray(u)
 for num in range(8):
     xy_theta = num / 8 * 2 * np.pi
     c_ab = NA * np.cos(xy_theta), NA * np.sin(xy_theta)
-    u = ssnp.read("plane", np.complex128, shape=n.shape[1:])
-    u, c_ab_trunc = ssnp.tilt(u, c_ab, trunc=True)
-    beam.forward = u
+    ui = u * beam.multiplier.tilt(c_ab, trunc=True, gpu=True)
+    beam.forward = ui
     beam.backward = 0
     beam.ssnp(1, n)
     beam.ssnp(-len(n) / 2)
-    u = beam.forward
-    ssnp.binary_pupil(u, 1.0001 * NA)
-    steps.append(u.get())
+    beam.backward = None
+    beam.binary_pupil(1.0001 * NA)
+    steps.append(beam.forward.get())
 print(time() - t)
 
 ssnp.write("cudatest.tiff", np.stack(steps), scale=0.5, pre_operator=lambda x: np.abs(x))

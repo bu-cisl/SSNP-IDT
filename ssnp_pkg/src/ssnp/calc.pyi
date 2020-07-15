@@ -1,7 +1,9 @@
-from typing import Tuple, Literal
+from typing import Tuple, Literal, Union
+from .funcs import BPMFuncs, SSNPFuncs
 from pycuda.gpuarray import GPUArray
 import numpy as np
 from numbers import Real
+from .utils import Multipliers
 
 
 def ssnp_step(u: GPUArray, u_d: GPUArray, dz: Real, n: GPUArray = None, output: GPUArray = None) -> Tuple[
@@ -23,7 +25,13 @@ def reduce_mse_grad(u: GPUArray, measurement: GPUArray, output: GPUArray = None)
 def pure_forward_d(u: GPUArray, output: GPUArray = None) -> GPUArray: ...
 
 
-def binary_pupil(u: GPUArray, na: float) -> GPUArray: ...
+def binary_pupil(u: GPUArray, na: float, multiplier: Multipliers = None) -> GPUArray: ...
+
+
+def get_multiplier(arr_like): ...
+
+
+def u_mul_grad_bp(ug, mul): ...
 
 
 def merge_prop(ub: GPUArray, uf: GPUArray, copy: bool = False) -> Tuple[GPUArray, GPUArray]: ...
@@ -32,4 +40,4 @@ def merge_prop(ub: GPUArray, uf: GPUArray, copy: bool = False) -> Tuple[GPUArray
 def split_prop(u: GPUArray, u_d: GPUArray, copy: bool = False) -> Tuple[GPUArray, GPUArray]: ...
 
 
-def get_funcs(arr_like: GPUArray, res, model: Literal['ssnp', 'bpm', 'any']): ...
+def get_funcs(arr_like: GPUArray, res, model: Literal['ssnp', 'bpm', 'any']) -> Union[BPMFuncs, SSNPFuncs]: ...

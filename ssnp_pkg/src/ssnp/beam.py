@@ -4,37 +4,10 @@ import numpy as np
 from pycuda import gpuarray
 from pycuda.gpuarray import GPUArray
 from warnings import warn
-from .calc import split_prop as calc_split, merge_prop as calc_merge, pure_forward_d
+from .calc import split_prop as calc_split, merge_prop as calc_merge, get_multiplier
 from .calc import ssnp_step, bpm_step, binary_pupil as calc_pupil, reduce_mse
-from .calc import bpm_grad_bp, reduce_mse_grad
-
-
-# class TrackStack:
-#     def __init__(self, u_num, arr_like):
-#         self.track = []
-#         self._len = 0
-#         self._num = u_num
-#
-#
-#     def __len__(self):
-#         return self._len
-#
-#     def __getitem__(self, item):
-#         if item < self._len:
-#             return self.track[item]
-#         else:
-#             raise IndexError("index out of range")
-#
-#     def clear(self):
-#         self._len = 0
-#
-#     def get_push(self):
-#         try:
-#             return self.track[self._len]
-#         except IndexError:
-#             self.track.append({'u': [gpuarray.empty_like(self.), gpuarray.e]})
-#         finally:
-#             self._len += 1
+from .calc import bpm_grad_bp, reduce_mse_grad, u_mul_grad_bp
+from .utils import param_check
 
 
 class BeamArray:
@@ -47,7 +20,7 @@ class BeamArray:
             if isinstance(u, GPUArray):
                 if u.dtype != self.dtype:
                     raise ValueError(f"GPUArray {name} must be {self.dtype} but not {u.dtype}")
-                return u
+                return u.copy()
             elif isinstance(u, np.ndarray):
                 if u.dtype != self.dtype:
                     warn(f"force casting {name} to {self.dtype}", stacklevel=3)
@@ -70,6 +43,7 @@ class BeamArray:
             self._u2 = None
         self._history = []
         self._array_pool = []
+        self.multiplier = get_multiplier(self._u1)
 
     def _get_array(self):
         if len(self._array_pool) == 0:
@@ -148,6 +122,7 @@ class BeamArray:
         if self._u2 is not None:
             self.split_prop()
         if value is None:
+            self.recycle_array(self._u2)
             self._u2 = None
         else:
             if self._u2 is None:
@@ -166,6 +141,7 @@ class BeamArray:
         if self._u2 is not None:
             self.merge_prop()
         if value is None:
+            self.recycle_array(self._u2)
             self._u2 = None
         else:
             if self._u2 is None:
@@ -173,31 +149,33 @@ class BeamArray:
                 self.relation = BeamArray.DERIVATIVE
             self._u_setter(self._u2, value)
 
-    def ssnp(self, dz, n=None, track=False):
+    def ssnp(self, dz, n=None, *, track=False):
         if self._u2 is None:
             warn("incomplete field information, assuming u is pure forward")
-            self.set_pure_forward()
+            self.backward = 0
         self.merge_prop()
         self._parse(('ssnp', self._u1, self._u2), dz, n, track)
 
-    def bpm(self, dz, n=None, track=False):
+    def bpm(self, dz, n=None, *, track=False):
         if self._u2 is not None:
             warn("discarding backward propagation part of bidirectional field", stacklevel=2)
-            self.split_prop()
-            self._u2 = None
+            self.backward = None
         self._parse(('bpm', self._u1), dz, n, track)
 
     def n_grad(self, output=None):
+        # output shape checking/setting
         scatter_num = 0
         ug = None
         for op in self._history:
             if op[0] in {'ssnp', 'bpm'} and op[-1] is not None:
                 scatter_num += 1
         if output is None:
-            # scatter_num times of empty_like and dtype double
+            # new is scatter_num times of empty_like with double dtype
             output = GPUArray((scatter_num, *self._u1.shape), np.double)
         elif len(output) != scatter_num:
             raise ValueError(f"output length {len(output)} is different from scatter operation number {scatter_num}")
+
+        # processing
         while len(self._history) > 0:
             op = self._history.pop()
             if op[0] == "mse":
@@ -206,16 +184,22 @@ class BeamArray:
                 ug = self._get_array()
                 reduce_mse_grad(self.forward, op[1], output=ug)
 
-            elif op[0] == "bpm":
-                _, u, dz, n = op
+            elif op[0] in {"bpm", "u*"}:
                 if ug is None:
                     raise ValueError("no reduce operation")
-                if n is None:
-                    bpm_grad_bp(u, ug, dz)
-                else:
-                    scatter_num -= 1
-                    bpm_grad_bp(u, ug, dz, n, output[scatter_num])
-                    self.recycle_array(u)
+
+                if op[0] == "bpm":
+                    _, u, dz, n = op
+                    if n is None:
+                        bpm_grad_bp(u, ug, dz)
+                    else:
+                        scatter_num -= 1
+                        bpm_grad_bp(u, ug, dz, n, output[scatter_num])
+                        self.recycle_array(u)
+
+                elif op[0] == "u*":
+                    _, mul = op
+                    u_mul_grad_bp(ug, mul)
             else:
                 raise NotImplementedError(f"unknown operation {op[0]}")
         assert scatter_num == 0
@@ -225,6 +209,14 @@ class BeamArray:
         calc_pupil(self._u1, na)
         if self._u2 is not None:
             calc_pupil(self._u2, na)
+
+    def mul(self, arr, *, track=False):
+        param_check(field=self._u1, arr=arr)
+        self._u1 *= arr
+        if self._u2 is not None:
+            self._u2 *= arr
+        if track:
+            self._history.append(("u*", arr))
 
     def forward_mse_loss(self, measurement, *, track=False):
         if track:

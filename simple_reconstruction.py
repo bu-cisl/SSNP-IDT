@@ -21,18 +21,19 @@ ng = gpuarray.empty_like(n)
 NA = 0.65
 
 u_list = []
+u_plane = ssnp.read("plane", np.complex128, shape=n.shape[1:])
+beam = BeamArray(u_plane)
+
 for num in range(8):
-    u = ssnp.read("plane", np.complex128, shape=n.shape[1:])
     xy_theta = num / 8 * 2 * np.pi
     c_ab = NA * np.cos(xy_theta), NA * np.sin(xy_theta)
-    u, c_ab_trunc = ssnp.tilt(u, c_ab, trunc=True)
+    u = u_plane * beam.multiplier.tilt(c_ab, trunc=True, gpu=True)
     u_list.append(u)
-beam = BeamArray(u_list[0])
 mea = ssnp.read("meabb.tiff", np.double)
 mea *= 2
 
 t = time()
-for step in range(3):
+for step in range(5):
     print(f"Step: {step}")
     for num in range(8):
         beam.forward = u_list[num]
@@ -42,8 +43,8 @@ for step in range(3):
         loss = beam.forward_mse_loss(mea[num], track=True)
         print(f"dir {num}, loss = {loss}")
         beam.n_grad(ng)
-        ng *= 0.001
+        ng *= 0.005
         n -= ng
 print(time() - t)
 
-ssnp.write("bpm_recbb.tiff", n, scale=0.5, pre_operator=lambda x: np.abs(x))
+ssnp.write("bpm_recbb.tiff", n, scale=1, pre_operator=lambda x: x)
