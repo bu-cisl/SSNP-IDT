@@ -3,35 +3,7 @@ import math
 import numpy as np
 from pycuda import gpuarray
 import functools
-
-
-# from .const import config
-
-
-# def tilt(img, c_ab, *, trunc=False, copy=False):
-#     """
-#     Tilt an image as illumination
-#
-#     :param copy:
-#     :param img: Amplitude graph
-#     :param c_ab: (cos(alpha), cos(beta))
-#     :param trunc: whether trunc to a grid point in Fourier plane
-#     :return: complex tf Tensor of input field
-#     """
-#     size = img.shape[::-1]
-#     if len(size) != 2:
-#         raise ValueError(f"Illumination should be a 2-D tensor rather than shape '{img.shape}'.")
-#     norm = [size[i] * config.res[i] * config.n0 for i in (0, 1)]
-#     if trunc:
-#         c_ab = [np.trunc(c_ab[i] * norm[i]) / norm[i] for i in (0, 1)]
-#     xr, yr = [np.arange(size[i]) / size[i] * c_ab[i] * norm[i] for i in (0, 1)]
-#     phase = np.mod(xr + yr[:, None], 1).astype(np.double) * 2 * np.pi
-#     phase = gpuarray.to_gpu(np.exp(1j * phase))
-#     if copy:
-#         img = img * phase
-#     else:
-#         img *= phase
-#     return img, c_ab
+from warnings import warn
 
 
 def param_check(**kwargs):
@@ -134,5 +106,32 @@ class Multipliers:
             ]
             c_gamma = np.sqrt(np.maximum(1 - (np.square(c_alpha) + np.square(c_beta[:, None])), eps))
             return c_gamma
+
+        return key, calc
+
+    @_cache_array
+    def soft_crop(self, width, *, total_slices=1, pos=0, strength=1):
+        shape = self.shape
+        if width >= 1 or width <= 0:
+            raise ValueError("width should be a relative value in 0-1")
+        key = ("cr", round(width * 100), round(pos * 100), round(total_slices), round(strength * 100))
+        if strength < 0.1:
+            warn("strength is too weak, change to 0.1", stacklevel=3)
+            strength = 0.1
+
+        def calc():
+            x, y = [
+                np.exp(
+                    -np.exp(
+                        -(((np.mod((np.arange(shape[i]).astype(np.double) + 0.5) / shape[i] + 0.5 - pos, 1)
+                            * 2 - 1) / width) ** 2
+                          ) * (np.log(10 * strength) + 0.8))
+                    * 10 * strength / total_slices
+                )
+                for i in (0, 1)
+            ]
+            # x, y = np.exp(-mask * 10 * strength / total_slices)
+            mask = x[:, None] * y
+            return mask
 
         return key, calc

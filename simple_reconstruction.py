@@ -45,6 +45,7 @@ for step in range(5):
         beam.n_grad(ng)
         ng *= 0.005
         n -= ng
+        n = gpuarray.maximum(n, 0, out=n)
 print(time() - t)
 
 ssnp.write("bpm_recbb.tiff", n, scale=1, pre_operator=lambda x: x)

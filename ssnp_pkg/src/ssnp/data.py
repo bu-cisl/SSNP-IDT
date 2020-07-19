@@ -2,7 +2,7 @@ import sys
 
 import numpy as np
 from tifffile import TiffWriter, TiffFile
-from scipy.io import loadmat, whosmat
+from scipy.io import loadmat, whosmat, savemat
 from warnings import warn
 import os
 import csv
@@ -213,6 +213,15 @@ def csv_write(path: str, table):
             writer.writerow(row)
 
 
+def mat_write(path, arr, *, scale=1., pre_operator=None, dtype=None, compress=True, key="data"):
+    if pre_operator is not None:
+        arr = pre_operator(arr)
+    arr *= scale
+    if dtype is not None:
+        arr = arr.astype(dtype)
+    savemat(path, {key: arr}, do_compression=compress)
+
+
 def write(dest, array, **kwargs):
     if isinstance(array, np.ndarray):
         arr = array
@@ -236,11 +245,11 @@ def write(dest, array, **kwargs):
         tiff_write(dest, arr, **kwargs)
     elif ext in {'.npy', '.npz'}:
         np_write(dest, arr, **kwargs)
-    elif ext == '.csv':
-        csv_write(dest, arr)
+    elif ext == '.mat':
+        mat_write(dest, arr, **kwargs)
     elif ext == '.bin':
         binary_write(dest, arr, **kwargs)
+    elif ext == '.csv':
+        csv_write(dest, arr)
     else:
         raise ValueError(f"unknown filename extension '{ext}'")
-
-# def conf_load():
