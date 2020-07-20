@@ -1,3 +1,6 @@
+"""
+Module for BeamArray class
+"""
 from collections import Iterable
 from numbers import Number
 import numpy as np
@@ -11,6 +14,13 @@ from .utils import param_check
 
 
 class BeamArray:
+    """
+    BeamArray provide convenient ways to perform operations for GPUArray (or GPUArrays pair):
+
+    1. For SSNP, forward/backward and field/derivation representation can convert transparently when needed.
+
+    2. Operation can be tracked for ``n_grad`` to get n gradient easily and fast
+    """
     dtype = np.complex128
     DERIVATIVE = 0
     BACKWARD = 1
@@ -52,6 +62,8 @@ class BeamArray:
             return self._array_pool.pop()
 
     def recycle_array(self, arr):
+        param_check(beam=self._u1, recycle=arr)
+        assert arr.dtype == self.dtype
         self._array_pool.append(arr)
 
     def split_prop(self):
@@ -63,20 +75,6 @@ class BeamArray:
         if self.relation == BeamArray.BACKWARD:
             calc_merge(self._u1, self._u2)
             self.relation = BeamArray.DERIVATIVE
-
-    # def set_pure_forward(self):
-    #     if self._u2 is not None:
-    #         warn("overwrite existing backward part")
-    #         if self.relation == BeamArray.BACKWARD:
-    #             self.relation = BeamArray.DERIVATIVE
-    #         elif self.relation == BeamArray.DERIVATIVE:
-    #             calc_split(self._u1, self._u2)
-    #         else:
-    #             raise AttributeError
-    #     else:
-    #         self.relation = BeamArray.DERIVATIVE
-    #     # now relation is D, u1 is forward
-    #     self._u2 = pure_forward_d(self._u1)
 
     @property
     def forward(self):
@@ -107,6 +105,7 @@ class BeamArray:
         if isinstance(value, (GPUArray, np.ndarray)):
             u.set(value)
         elif isinstance(value, Number):
+            value: float
             u.fill(np.array(value, dtype=dtype))
         else:
             raise AttributeError(f"cannot set value type {type(value)} to BeamArray")
@@ -150,6 +149,13 @@ class BeamArray:
             self._u_setter(self._u2, value)
 
     def ssnp(self, dz, n=None, *, track=False):
+        """
+        Perform an SSNP operation for this beam array
+
+        :param dz: z slice thickness, unit: z pixel size
+        :param n: refractive index, default is background n0
+        :param track: track this operation for gradient calculation
+        """
         if self._u2 is None:
             warn("incomplete field information, assuming u is pure forward")
             self.backward = 0
@@ -157,6 +163,13 @@ class BeamArray:
         self._parse(('ssnp', self._u1, self._u2), dz, n, track)
 
     def bpm(self, dz, n=None, *, track=False):
+        """
+        Perform a BPM operation for this beam array
+
+        :param dz: z slice thickness, unit: z pixel size
+        :param n: refractive index, default is background n0
+        :param track: track this operation for gradient calculation
+        """
         if self._u2 is not None:
             warn("discarding backward propagation part of bidirectional field", stacklevel=2)
             self.backward = None
@@ -210,13 +223,65 @@ class BeamArray:
         if self._u2 is not None:
             calc_pupil(self._u2, na)
 
-    def mul(self, arr, *, track=False):
-        param_check(field=self._u1, arr=arr)
-        self._u1 *= arr
+    def mul(self, arr, *, hold=None, track=False):
+        """
+        calculate ``beam *= arr``
+
+        If hold is given, ``beam = (beam - hold) * arr + hold``
+
+        :param arr: other array to multiply
+        :param hold: some part not perform multiply
+        :param track: track this operation for gradient calculation
+        """
+        param_check(field=self._u1, arr=arr, hold=None if hold is None else hold._u1)
+        if hold is not None:
+            self.__isub__(hold)
+            self.mul(arr, track=track)
+            self.__iadd__(hold)
+        else:
+            self.__imul__(arr)
+            if track:
+                self._history.append(("u*", arr))
+
+    def __imul__(self, other):
+        self._u1 *= other
         if self._u2 is not None:
-            self._u2 *= arr
-        if track:
-            self._history.append(("u*", arr))
+            self._u2 *= other
+        return self
+
+    @staticmethod
+    def _iadd_isub(self, other, add):
+        assert isinstance(other, BeamArray)
+        param_check(self=self._u1, add=other._u1)
+        if self._u2 is None:
+            if other._u2 is None:
+                if add:
+                    self._u1 += other._u1
+                else:
+                    self._u1 -= other._u1
+            else:
+                raise ValueError("incompatible BeamArray type")
+        else:
+            if other._u2 is None:
+                raise ValueError("incompatible BeamArray type")
+            else:
+                if self.relation == BeamArray.DERIVATIVE:
+                    other.merge_prop()
+                else:
+                    other.split_prop()
+                if add:
+                    self._u1 += other._u1
+                    self._u2 += other._u2
+                else:
+                    self._u1 -= other._u1
+                    self._u2 -= other._u2
+        return self
+
+    def __iadd__(self, other):
+        return BeamArray._iadd_isub(self, other, add=True)
+
+    def __isub__(self, other):
+        return BeamArray._iadd_isub(self, other, add=False)
 
     def forward_mse_loss(self, measurement, *, track=False):
         if track:

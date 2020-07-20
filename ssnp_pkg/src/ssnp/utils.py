@@ -112,12 +112,13 @@ class Multipliers:
     @_cache_array
     def soft_crop(self, width, *, total_slices=1, pos=0, strength=1):
         shape = self.shape
+        width = float(width)
         if width >= 1 or width <= 0:
             raise ValueError("width should be a relative value in 0-1")
         key = ("cr", round(width * 100), round(pos * 100), round(total_slices), round(strength * 100))
-        if strength < 0.1:
-            warn("strength is too weak, change to 0.1", stacklevel=3)
-            strength = 0.1
+        if strength < 0.01:
+            warn("strength is too weak, change to 0.01", stacklevel=3)
+            strength = 0.01
 
         def calc():
             x, y = [
@@ -125,8 +126,8 @@ class Multipliers:
                     -np.exp(
                         -(((np.mod((np.arange(shape[i]).astype(np.double) + 0.5) / shape[i] + 0.5 - pos, 1)
                             * 2 - 1) / width) ** 2
-                          ) * (np.log(10 * strength) + 0.8))
-                    * 10 * strength / total_slices
+                          ) * (np.log(100 * strength) + 0.8))
+                    * 100 * strength / total_slices
                 )
                 for i in (0, 1)
             ]
