@@ -3,6 +3,7 @@ from typing import Literal, Optional, List, Union
 import numpy as np
 from .utils import Multipliers
 
+G_PRO = Union[GPUArray, property]
 
 class TrackStack:
     def __init__(self, u_num, shape): ...
@@ -17,17 +18,15 @@ class BeamArray:
     relation: Literal[0, 1]
     _u1: GPUArray
     _u2: Optional[GPUArray]
-    forward: Union[GPUArray, property]
-    backward: Union[Optional[GPUArray], property]
-    field: Union[GPUArray, property]
-    derivative: Union[Optional[GPUArray], property]
+    forward: G_PRO
+    backward: Optional[G_PRO]
+    field: G_PRO
+    derivative: Optional[G_PRO]
     multiplier: Multipliers
     _array_pool: List[GPUArray, ...]
+    _tape: list
 
-    _history: list
-
-    def __init__(self, u1: GPUArray, u2: GPUArray = None, relation: Literal[0, 1] = DERIVATIVE):
-        ...
+    def __init__(self, u1: GPUArray, u2: GPUArray = None, relation: Literal[0, 1] = DERIVATIVE): ...
 
     def _parse(self, info, dz, n, track: bool): ...
 
@@ -55,8 +54,6 @@ class BeamArray:
     def split_prop(self): ...
 
     def merge_prop(self): ...
-
-    # def set_pure_forward(self): ...
 
     def _get_array(self) -> GPUArray: ...
 

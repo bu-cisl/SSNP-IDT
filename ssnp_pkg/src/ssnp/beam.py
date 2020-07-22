@@ -51,7 +51,7 @@ class BeamArray:
             self._u2 = to_gpu(u2, "u2")
         else:
             self._u2 = None
-        self._history = []
+        self._tape = []
         self._array_pool = []
         self.multiplier = get_multiplier(self._u1)
 
@@ -179,7 +179,7 @@ class BeamArray:
         # output shape checking/setting
         scatter_num = 0
         ug = None
-        for op in self._history:
+        for op in self._tape:
             if op[0] in {'ssnp', 'bpm'} and op[-1] is not None:
                 scatter_num += 1
         if output is None:
@@ -189,8 +189,8 @@ class BeamArray:
             raise ValueError(f"output length {len(output)} is different from scatter operation number {scatter_num}")
 
         # processing
-        while len(self._history) > 0:
-            op = self._history.pop()
+        while len(self._tape) > 0:
+            op = self._tape.pop()
             if op[0] == "mse":
                 if ug is not None:
                     raise ValueError("multiple reduce operation")
@@ -241,7 +241,7 @@ class BeamArray:
         else:
             self.__imul__(arr)
             if track:
-                self._history.append(("u*", arr))
+                self._tape.append(("u*", arr))
 
     def __imul__(self, other):
         self._u1 *= other
@@ -285,7 +285,7 @@ class BeamArray:
 
     def forward_mse_loss(self, measurement, *, track=False):
         if track:
-            self._history.append(("mse", measurement))
+            self._tape.append(("mse", measurement))
         return reduce_mse(self.forward, measurement)
 
     def _parse(self, info, dz, n, track):
@@ -298,7 +298,7 @@ class BeamArray:
                     else:
                         u_save = self._get_array()
                         u_save.set(info[1])
-                    self._history.append(('bpm', u_save, var_dz, var_n))
+                    self._tape.append(('bpm', u_save, var_dz, var_n))
             elif info[0] == 'ssnp':
                 ssnp_step(info[1], info[2], var_dz, var_n)
                 if track:
@@ -306,7 +306,7 @@ class BeamArray:
                     u_save.set(info[1])
                     ud_save = self._get_array()
                     ud_save.set(info[2])
-                    self._history.append(('ssnp', u_save, ud_save, var_dz, var_n))
+                    self._tape.append(('ssnp', u_save, ud_save, var_dz, var_n))
 
         if n is None:
             if isinstance(dz, Iterable):

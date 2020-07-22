@@ -1,0 +1,8 @@
+## Changelog
+
+### 0.0.1.rc4
+
+* Add gradient calculation support (tracking operations and doing autograd)
+* Add config to set package-wise constant
+* Add Multiplier class to generate auto-cached numpy/gpu array
+* Add MATLAB .mat file read & write support (rely on scipy lib)
