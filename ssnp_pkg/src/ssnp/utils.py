@@ -27,6 +27,7 @@ def param_check(**kwargs):
 def _cache_array(func):
     @functools.wraps(func)
     def get_cache(self, *args, gpu=False, **kwargs):
+        self: Multipliers
         key, calc = func(self, *args, **kwargs)
         if gpu:
             try:
@@ -39,6 +40,7 @@ def _cache_array(func):
             return self._cache[key]
         except KeyError:
             arr = calc()
+            assert arr.shape == self._shape
             self._cache[key] = arr
             return arr
 
@@ -47,7 +49,9 @@ def _cache_array(func):
 
 class Multipliers:
     def __init__(self, shape, res):
-        self.shape = shape
+        assert len(shape) == 2
+        self._xy_size = (shape[1], shape[0])
+        self._shape = shape
         self.res = res
         self._cache = {}
         self._gpu_cache = {}
@@ -55,17 +59,17 @@ class Multipliers:
     @_cache_array
     def tilt(self, c_ab, *, trunc):
         res = self.res
-        shape = self.shape
-        norm = tuple(shape[i] * res[i] for i in (0, 1))  # to be confirmed: * config.n0
+        xy_size = self._xy_size
+        norm = tuple(xy_size[i] * res[i] for i in (0, 1))  # to be confirmed: * config.n0
         if trunc:
             c_ab = [math.trunc(c_ab[i] * norm[i]) / norm[i] for i in (0, 1)]
         c_ab = tuple(float(i) for i in c_ab)
         key = ("t", c_ab, res)
 
         def calc():
-            xr, yr = [np.arange(shape[i]) / shape[i] * c_ab[i] * norm[i] for i in (0, 1)]
-            phase = np.mod(xr + yr[:, None], 1).astype(np.double) * 2 * np.pi
-            phase = gpuarray.to_gpu(np.exp(1j * phase))
+            xr, yr = [np.arange(xy_size[i]) / xy_size[i] * c_ab[i] * norm[i] for i in (0, 1)]
+            phase = np.mod(xr + yr[:, None], 1).astype(np.complex128)
+            phase = np.exp(2j * np.pi * phase)
             return phase
 
         return key, calc
@@ -79,7 +83,6 @@ class Multipliers:
         def calc():
             mask = np.greater(c_gamma, np.sqrt(1 - na ** 2))
             mask = mask.astype(np.complex128)
-            mask = gpuarray.to_gpu(mask)
             return mask
 
         return key, calc
@@ -94,14 +97,14 @@ class Multipliers:
 
         :return: cos(gamma) numpy array
         """
-        shape = self.shape
+        xy_size = self._xy_size
         res = self.res
         key = ("cg", res)
 
         def calc():
             eps = 1E-8
             c_alpha, c_beta = [
-                np.fft.ifftshift(np.arange(-shape[i] / 2, shape[i] / 2).astype(np.double)) / shape[i] / res[i]
+                np.fft.ifftshift(np.arange(-xy_size[i] / 2, xy_size[i] / 2).astype(np.double)) / xy_size[i] / res[i]
                 for i in (0, 1)
             ]
             c_gamma = np.sqrt(np.maximum(1 - (np.square(c_alpha) + np.square(c_beta[:, None])), eps))
@@ -111,7 +114,7 @@ class Multipliers:
 
     @_cache_array
     def soft_crop(self, width, *, total_slices=1, pos=0, strength=1):
-        shape = self.shape
+        xy_size = self._xy_size
         width = float(width)
         if width >= 1 or width <= 0:
             raise ValueError("width should be a relative value in 0-1")
@@ -124,15 +127,14 @@ class Multipliers:
             x, y = [
                 np.exp(
                     -np.exp(
-                        -(((np.mod((np.arange(shape[i]).astype(np.double) + 0.5) / shape[i] + 0.5 - pos, 1)
+                        -(((np.mod((np.arange(xy_size[i]).astype(np.double) + 0.5) / xy_size[i] + 0.5 - pos, 1)
                             * 2 - 1) / width) ** 2
                           ) * (np.log(100 * strength) + 0.8))
                     * 100 * strength / total_slices
                 )
                 for i in (0, 1)
             ]
-            # x, y = np.exp(-mask * 10 * strength / total_slices)
-            mask = x[:, None] * y
+            mask = x * y[:, None]
             return mask
 
         return key, calc

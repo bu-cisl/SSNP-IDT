@@ -1,11 +1,8 @@
 from numbers import Real
-from typing import List, Tuple, Callable, Any, overload, Literal
+from typing import Tuple, Callable, overload, Literal
 
 import numpy as np
 from pycuda.gpuarray import GPUArray
-
-
-# def tilt(img: GPUArray, c_ab: tuple, *, trunc: bool = False, copy: bool = False): ...
 
 
 def param_check(**kwargs): ...
@@ -17,7 +14,8 @@ def _cache_array(func: Callable[..., Tuple[tuple, Callable[[], np.ndarray]]]): .
 class Multipliers:
     _cache: dict
     _gpu_cache: dict
-    shape: Tuple[int, int]
+    _xy_size: Tuple[int, int]
+    _shape: Tuple[int, int]
     res: Tuple[float, float, float]
 
     def __init__(self, shape: Tuple[int, int], res: Tuple[float, float, float]): ...
