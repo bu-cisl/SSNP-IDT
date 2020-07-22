@@ -112,6 +112,23 @@ class Multipliers:
 
         return key, calc
 
+    @staticmethod
+    def _near_0(size, pos_0):
+        """
+        Return ``f(x)``, which satisfies:
+
+        ``f(x)`` range ``[-0.5, 0.5)``,
+
+        ``f'(x) = 1`` (except for the discontinuity point jumping from 0.5 to -0.5),
+
+        ``f(pos_0) = 0``
+
+        :param size: arr length
+        :param pos_0: position of zero
+        :return:
+        """
+        return np.mod((np.arange(size).astype(np.double) + 0.5) / size + 0.5 - pos_0, 1) - 0.5
+
     @_cache_array
     def soft_crop(self, width, *, total_slices=1, pos=0, strength=1):
         xy_size = self._xy_size
@@ -125,13 +142,27 @@ class Multipliers:
 
         def calc():
             x, y = [
-                np.exp(
-                    -np.exp(
-                        -(((np.mod((np.arange(xy_size[i]).astype(np.double) + 0.5) / xy_size[i] + 0.5 - pos, 1)
-                            * 2 - 1) / width) ** 2
-                          ) * (np.log(100 * strength) + 0.8))
-                    * 100 * strength / total_slices
-                )
+                np.exp(-np.exp(-(self._near_0(xy_size[i], pos) * 2 / width) ** 2 * (np.log(100 * strength) + 0.8))
+                       * 100 * strength / total_slices)
+                for i in (0, 1)
+            ]
+            mask = x * y[:, None]
+            return mask
+
+        return key, calc
+
+    @_cache_array
+    def gaussian(self, sigma, mu=(0, 0)):
+        xy_size = self._xy_size
+        res = self.res
+        sigma = float(sigma)
+        mu = tuple(float(i) for i in mu)
+        key = ("ga", round(sigma * 100), tuple(round(i * 100) for i in mu))
+
+        def calc():
+            x, y = [
+                np.exp(-(self._near_0(xy_size[i], mu[i])) ** 2
+                       / 2 / (sigma / res[i] / xy_size[i]) ** 2)
                 for i in (0, 1)
             ]
             mask = x * y[:, None]

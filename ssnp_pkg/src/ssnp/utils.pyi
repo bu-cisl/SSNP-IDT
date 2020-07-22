@@ -38,6 +38,9 @@ class Multipliers:
     @overload
     def c_gamma(self, *, gpu: Literal[False] = False) -> np.ndarray: ...
 
+    @staticmethod
+    def _near_0(size, pos_0): ...
+
     @overload
     def soft_crop(self, width: Real, *, total_slices: int = 1, pos: Real = 0, strength: Real = 1,
                   gpu: Literal[True]) -> GPUArray: ...
@@ -45,3 +48,9 @@ class Multipliers:
     @overload
     def soft_crop(self, width: Real, *, total_slices: int = 1, pos: Real = 0, strength: Real = 1,
                   gpu: Literal[False] = False) -> np.ndarray: ...
+
+    @overload
+    def gaussian(self, sigma: Real, mu: Tuple[Real, Real] = (0, 0), *, gpu: Literal[True]) -> GPUArray: ...
+
+    @overload
+    def gaussian(self, sigma: Real, mu: Tuple[Real, Real] = (0, 0), *, gpu: Literal[False] = False) -> np.ndarray: ...
