@@ -25,7 +25,7 @@ class BeamArray:
     DERIVATIVE = 0
     BACKWARD = 1
 
-    def __init__(self, u1, u2=None, relation=BACKWARD):
+    def __init__(self, u1, u2=None, relation=BACKWARD, total_ops=0):
         def to_gpu(u, name):
             if isinstance(u, GPUArray):
                 if u.dtype != self.dtype:
@@ -54,9 +54,15 @@ class BeamArray:
         self._tape = []
         self._array_pool = []
         self.multiplier = get_multiplier(self._u1)
+        self._get_array_times = 0
+
+        max_ops = int(np.sqrt(2 * total_ops)) + 1 if total_ops > 0 else 0
+        self.ops_number = {"max": max_ops, "remainder": max_ops, "current": max_ops}
 
     def _get_array(self):
         if len(self._array_pool) == 0:
+            self._get_array_times += 1
+            print(f"get array times: {self._get_array_times}")
             return gpuarray.empty_like(self._u1)
         else:
             return self._array_pool.pop()
@@ -206,6 +212,31 @@ class BeamArray:
                     if n is None:
                         bpm_grad_bp(u, ug, dz)
                     else:
+                        if u is None:
+                            index = len(self._tape) - 1
+                            while True:
+                                if self._tape[index][1] is None:
+                                    index = index - 1
+                                    assert index >= 0
+                                else:
+                                    if self._tape[index][0] == "bpm":
+                                        break
+                            index_u = self._get_array()
+                            index_u.set(self._tape[index][1])
+                            index += 1
+                            # recalculate previous u for n!=None but u==None ops
+                            while index < len(self._tape):
+                                if self._tape[index][0] == "bpm":
+                                    bpm_step(index_u, *self._tape[index][2:])
+                                    if self._tape[index][3] is not None:
+                                        assert self._tape[index][1] is None
+                                        self._tape[index][1] = index_u
+                                        index_u = self._get_array()
+                                        index_u.set(self._tape[index][1])
+                                index += 1
+                            bpm_step(index_u, dz, n)  # recalculate current step u
+                            u = index_u
+                        # u, ug, dz, n is all checked and not None
                         scatter_num -= 1
                         bpm_grad_bp(u, ug, dz, n, output[scatter_num])
                         self.recycle_array(u)
@@ -216,6 +247,8 @@ class BeamArray:
             else:
                 raise NotImplementedError(f"unknown operation {op[0]}")
         assert scatter_num == 0
+        self.recycle_array(ug)
+        self.ops_number["remainder"] = self.ops_number["current"] = self.ops_number["max"]
         return output
 
     def binary_pupil(self, na):
@@ -293,12 +326,19 @@ class BeamArray:
             if info[0] == 'bpm':
                 bpm_step(info[1], var_dz, var_n)
                 if track:
-                    if n is None:
+                    if var_n is None:
                         u_save = None
                     else:
-                        u_save = self._get_array()
-                        u_save.set(info[1])
-                    self._tape.append(('bpm', u_save, var_dz, var_n))
+                        if self.ops_number["current"] >= self.ops_number["remainder"]:
+                            u_save = self._get_array()
+                            u_save.set(info[1])
+                            if self.ops_number["remainder"] > 0:
+                                self.ops_number["remainder"] -= 1
+                                self.ops_number["current"] = 0
+                        else:
+                            self.ops_number["current"] += 1
+                            u_save = None
+                    self._tape.append(['bpm', u_save, var_dz, var_n])
             elif info[0] == 'ssnp':
                 ssnp_step(info[1], info[2], var_dz, var_n)
                 if track:

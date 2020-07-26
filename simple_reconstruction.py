@@ -22,7 +22,7 @@ NA = 0.65
 
 u_list = []
 u_plane = ssnp.read("plane", np.complex128, shape=n.shape[1:])
-beam = BeamArray(u_plane)
+beam = BeamArray(u_plane, total_ops=len(n))
 
 for num in range(8):
     xy_theta = num / 8 * 2 * np.pi

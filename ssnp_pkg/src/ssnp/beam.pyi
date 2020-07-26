@@ -16,6 +16,7 @@ class BeamArray:
     DERIVATIVE = 0
     BACKWARD = 1
     relation: Literal[0, 1]
+    _get_array_times: int
     _u1: GPUArray
     _u2: Optional[GPUArray]
     forward: G_PRO
@@ -25,8 +26,9 @@ class BeamArray:
     multiplier: Multipliers
     _array_pool: List[GPUArray, ...]
     _tape: list
+    ops_number: dict
 
-    def __init__(self, u1: GPUArray, u2: GPUArray = None, relation: Literal[0, 1] = DERIVATIVE): ...
+    def __init__(self, u1: GPUArray, u2: GPUArray = None, relation: Literal[0, 1] = DERIVATIVE, total_ops: int = 0): ...
 
     def _parse(self, info, dz, n, track: bool): ...
 
