@@ -56,6 +56,7 @@ class BeamArray:
 
         max_ops = int(np.sqrt(2 * total_ops)) + 1 if total_ops > 0 else 0
         self.ops_number = {"max": max_ops, "remainder": max_ops, "current": max_ops}
+        self._fft_funcs = calc.get_funcs(self._u1)
 
     def _get_array(self):
         if len(self._array_pool) == 0:
@@ -202,60 +203,71 @@ class BeamArray:
                 ug = self._get_array()
                 calc.reduce_mse_grad(self.forward, op[1], output=ug)
 
-            elif op[0] in {"bpm", "ssnp", "u*"}:
+            elif op[0] == "bpm":
                 if ug is None:
                     raise ValueError("no reduce operation")
-
-                if op[0] == "bpm":
-                    _, u, dz, n = op
-                    if n is None:
-                        calc.bpm_grad_bp(u, ug, dz)
-                    else:
-                        if u is None:
-                            index = len(self._tape) - 1
-                            while True:
-                                if self._tape[index][1] is None:
-                                    index = index - 1
-                                    assert index >= 0
-                                else:
-                                    if self._tape[index][0] == "bpm":
-                                        break
-                            index_u = self._get_array()
-                            index_u.set(self._tape[index][1])
-                            index += 1
-                            # recalculate previous u for n!=None but u==None ops
-                            while index < len(self._tape):
+                _, u, dz, n = op
+                if n is None:
+                    calc.bpm_grad_bp(u, ug, dz)
+                else:
+                    if u is None:
+                        index = len(self._tape) - 1
+                        while True:
+                            if self._tape[index][1] is None:
+                                index = index - 1
+                                assert index >= 0
+                            else:
                                 if self._tape[index][0] == "bpm":
-                                    calc.bpm_step(index_u, *self._tape[index][2:])
-                                    if self._tape[index][3] is not None:
-                                        assert self._tape[index][1] is None
-                                        self._tape[index][1] = index_u
-                                        index_u = self._get_array()
-                                        index_u.set(self._tape[index][1])
-                                index += 1
-                            calc.bpm_step(index_u, dz, n)  # recalculate current step u
-                            u = index_u
-                        # u, ug, dz, n is all checked and not None
-                        scatter_num -= 1
-                        calc.bpm_grad_bp(u, ug, dz, n, output[scatter_num])
-                        self.recycle_array(u)
-                if op[0] == "ssnp":
-                    _, u, _, dz, n = op
-                    if u_dg is None and ug is not None:
-                        ufg = ug
-                        ubg = self._get_array()
-                        ubg.fill(np.array(0, self.dtype))
-                        u, u_dg = calc.merge_grad(ufg, ubg)
-                    if n is None:
-                        calc.ssnp_grad_bp(u, ug, u_dg, dz)
-                    else:
-                        scatter_num -= 1
-                        calc.ssnp_grad_bp(u, ug, u_dg, dz, n, output[scatter_num])
-                        self.recycle_array(u)
+                                    break
+                        index_u = self._get_array()
+                        index_u.set(self._tape[index][1])
+                        index += 1
+                        # recalculate previous u for n!=None but u==None ops
+                        while index < len(self._tape):
+                            if self._tape[index][0] == "bpm":
+                                calc.bpm_step(index_u, *self._tape[index][2:])
+                                if self._tape[index][3] is not None:
+                                    assert self._tape[index][1] is None
+                                    self._tape[index][1] = index_u
+                                    index_u = self._get_array()
+                                    index_u.set(self._tape[index][1])
+                            index += 1
+                        calc.bpm_step(index_u, dz, n)  # recalculate current step u
+                        u = index_u
+                    # u, ug, dz, n is all checked and not None
+                    scatter_num -= 1
+                    calc.bpm_grad_bp(u, ug, dz, n, output[scatter_num])
+                    self.recycle_array(u)
 
-                elif op[0] == "u*":
-                    _, mul = op
+            elif op[0] == "ssnp":
+                if ug is None:
+                    raise ValueError("no reduce operation")
+                _, u, _, dz, n = op
+                if u_dg is None and ug is not None:
+                    ufg = ug
+                    ubg = self._get_array()
+                    ubg.fill(np.array(0, self.dtype))
+                    u, u_dg = calc.merge_grad(ufg, ubg)
+                if n is None:
+                    calc.ssnp_grad_bp(u, ug, u_dg, dz)
+                else:
+                    scatter_num -= 1
+                    calc.ssnp_grad_bp(u, ug, u_dg, dz, n, output[scatter_num])
+                    self.recycle_array(u)
+
+            elif op[0] == "u*":
+                _, mul = op
+                calc.u_mul_grad_bp(ug, mul)
+                if u_dg is not None:
+                    calc.u_mul_grad_bp(u_dg, mul)
+
+            elif op[0] == "a*":
+                _, mul = op
+                with self._fft_funcs.fourier(ug):
                     calc.u_mul_grad_bp(ug, mul)
+                if u_dg is not None:
+                    with self._fft_funcs.fourier(u_dg):
+                        calc.u_mul_grad_bp(u_dg, mul)
             else:
                 raise NotImplementedError(f"unknown operation {op[0]}")
         assert scatter_num == 0
@@ -298,15 +310,11 @@ class BeamArray:
             self.a_mul(arr, track=track)
             self.__iadd__(hold)
         else:
-            def angular_imul(arr_self):
-                funcs = calc.get_funcs(arr)
-                funcs.fft(arr_self)
-                arr_self *= arr
-                funcs.ifft(arr_self)
-
-            angular_imul(self._u1)
+            with self._fft_funcs.fourier(self._u1):
+                self._u1 *= arr
             if self._u2 is not None:
-                angular_imul(self._u2)
+                with self._fft_funcs.fourier(self._u2):
+                    self._u2 *= arr
             if track:
                 self._tape.append(("a*", arr))
 

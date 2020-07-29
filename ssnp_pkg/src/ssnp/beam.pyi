@@ -2,6 +2,7 @@ from pycuda.gpuarray import GPUArray
 from typing import Literal, Optional, List, Union
 import numpy as np
 from ssnp.utils import Multipliers
+from ssnp.funcs import Funcs
 
 G_PRO = Union[GPUArray, property]
 
@@ -27,6 +28,7 @@ class BeamArray:
     _array_pool: List[GPUArray, ...]
     _tape: list
     ops_number: dict
+    _fft_funcs: Funcs
 
     def __init__(self, u1: GPUArray, u2: GPUArray = None, relation: Literal[0, 1] = DERIVATIVE, total_ops: int = 0): ...
 

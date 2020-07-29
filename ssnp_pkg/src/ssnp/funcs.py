@@ -4,6 +4,7 @@ from reikna.fft import FFT
 import numpy as np
 import reikna.cluda as cluda
 from ssnp.utils import Multipliers
+from contextlib import contextmanager
 
 s = driver.Stream()
 api = cluda.cuda_api()
@@ -46,7 +47,7 @@ class Funcs:
     mul_grad_bp = elementwise.ElementwiseKernel(
         "double2 *ug, double2 *mul",
         """
-        ug[i] *= cuConj(mul[i])
+        ug[i] = cuCmul(ug[i], cuConj(mul[i]))
         """,
         preamble='#include "cuComplex.h"'
     )
@@ -78,6 +79,11 @@ class Funcs:
 
     def ifft(self, *args, **kwargs):
         return self.fft(*args, **kwargs, inverse=True)
+
+    @contextmanager
+    def fourier(self, arr, copy=False):
+        yield self.fft(arr, copy=copy)
+        self.ifft(arr)
 
     def diffract(self, *args):
         raise NotImplementedError
