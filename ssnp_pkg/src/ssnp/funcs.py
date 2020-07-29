@@ -3,7 +3,7 @@ from pycuda.gpuarray import GPUArray
 from reikna.fft import FFT
 import numpy as np
 import reikna.cluda as cluda
-from .utils import Multipliers
+from ssnp.utils import Multipliers
 
 s = driver.Stream()
 api = cluda.cuda_api()

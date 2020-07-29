@@ -4,6 +4,7 @@ from pycuda.gpuarray import GPUArray
 import numpy as np
 from numbers import Real
 from .utils import Multipliers
+from ssnp.const import Consts
 
 
 def ssnp_step(u: GPUArray, u_d: GPUArray, dz: Real, n: GPUArray = None, output: GPUArray = None) -> Tuple[
@@ -46,4 +47,6 @@ def split_prop(u: GPUArray, u_d: GPUArray, copy: bool = False) -> Tuple[GPUArray
 def merge_grad(ufg: GPUArray, ubg: GPUArray, copy: bool = False) -> Tuple[GPUArray, GPUArray]: ...
 
 
-def get_funcs(arr_like: GPUArray, res, model: Literal['ssnp', 'bpm', 'any']) -> Union[BPMFuncs, SSNPFuncs]: ...
+def get_funcs(arr_like: GPUArray, config: Consts = None,
+              model: Literal['ssnp', 'bpm', 'any', 'BPM', 'SSNP', 'Any', 'ANY'] = 'any'
+              ) -> Union[BPMFuncs, SSNPFuncs]: ...

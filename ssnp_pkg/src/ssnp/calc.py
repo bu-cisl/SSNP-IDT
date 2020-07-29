@@ -2,9 +2,9 @@ __funcs_cache = {}
 
 import numpy as np
 from pycuda import gpuarray
-from .funcs import BPMFuncs, SSNPFuncs, Funcs
-from .utils import param_check
-from .const import config
+from ssnp.funcs import BPMFuncs, SSNPFuncs, Funcs
+from ssnp.utils import param_check
+from ssnp.const import config as global_config
 
 
 def ssnp_step(u, u_d, dz, n=None, output=None):
@@ -19,7 +19,7 @@ def ssnp_step(u, u_d, dz, n=None, output=None):
     :return: new (u, u_d) after a step towards +z direction
     """
     param_check(u=u, u_d=u_d, n=n)
-    funcs: SSNPFuncs = get_funcs(u, config.res, model="ssnp")
+    funcs: SSNPFuncs = get_funcs(u, model="ssnp")
     a = funcs.fft(u, output=output)
     a_d = funcs.fft(u_d, output=output)
     funcs.diffract(a, a_d, dz)
@@ -42,7 +42,7 @@ def bpm_step(u, dz, n=None, output=None):
     :return: new (u, u_d) after a step towards +z direction
     """
     param_check(u=u, n=n, output=output)
-    funcs: BPMFuncs = get_funcs(u, config.res, model="bpm")
+    funcs: BPMFuncs = get_funcs(u, model="bpm")
     a = funcs.fft(u, output=output)
     funcs.diffract(a, dz)
     u = funcs.ifft(a)
@@ -56,7 +56,7 @@ def bpm_step(u, dz, n=None, output=None):
 
 def bpm_grad_bp(u, ug, dz, n=None, ng=None):
     param_check(u_1=u, u_grad=ug, n=n, n_grad=ng)
-    funcs: BPMFuncs = get_funcs(ug, config.res, model="bpm")
+    funcs: BPMFuncs = get_funcs(ug, model="bpm")
     if n is not None:
         funcs.scatter_g(u, n, ug, ng, dz)
     ag = funcs.fft(ug)
@@ -67,7 +67,7 @@ def bpm_grad_bp(u, ug, dz, n=None, ng=None):
 
 def ssnp_grad_bp(u, ug, u_dg, dz, n=None, ng=None):
     param_check(u_1=u, u_grad=ug, u_d_grad=u_dg, n=n, n_grad=ng)
-    funcs: SSNPFuncs = get_funcs(ug, config.res, model="ssnp")
+    funcs: SSNPFuncs = get_funcs(ug, model="ssnp")
     if n is not None:
         funcs.scatter_g(u, n, ug, u_dg, ng, dz)
     ag = funcs.fft(ug)
@@ -107,7 +107,7 @@ def reduce_mse_grad(u, measurement, output=None):
 
 
 def binary_pupil(u, na, multiplier=None):
-    funcs = get_funcs(u, config.res, model="any")
+    funcs = get_funcs(u, model="any")
     a = funcs.fft(u)
     if multiplier is None:
         a *= funcs.multiplier.binary_pupil(na, gpu=True)
@@ -117,12 +117,12 @@ def binary_pupil(u, na, multiplier=None):
 
 
 def get_multiplier(arr_like):
-    funcs = get_funcs(arr_like, config.res, model="any")
+    funcs = get_funcs(arr_like, model="any")
     return funcs.multiplier
 
 
 def u_mul_grad_bp(ug, mul):
-    funcs = get_funcs(ug, config.res, model="any")
+    funcs = get_funcs(ug, model="any")
     funcs.mul_grad_bp(ug, mul)
     return ug
 
@@ -136,7 +136,7 @@ def pure_forward_d(u, output=None):
     :param output: (optional) output memory, must have same shape and dtype
     :return: z partial derivative of u
     """
-    funcs = get_funcs(u, config.res, model="ssnp")
+    funcs = get_funcs(u, model="ssnp")
     af = funcs.fft(u, output=funcs.get_temp_mem(u))
     if output is None:
         ab = gpuarray.zeros_like(af)
@@ -155,7 +155,7 @@ def pure_forward_d(u, output=None):
 
 def merge_prop(uf, ub, copy=False):
     param_check(uf=uf, ub=ub)
-    funcs = get_funcs(uf, config.res, model="ssnp")
+    funcs = get_funcs(uf, model="ssnp")
     af = funcs.fft(uf, copy=copy)
     ab = funcs.fft(ub, copy=copy)
     funcs.merge_prop_kernel(af, ab, funcs.kz_gpu)
@@ -166,7 +166,7 @@ def merge_prop(uf, ub, copy=False):
 
 def split_prop(u, u_d, copy=False):
     param_check(u=u, u_d=u_d)
-    funcs = get_funcs(u, config.res, model="ssnp")
+    funcs = get_funcs(u, model="ssnp")
     a = funcs.fft(u, copy=copy)
     a_d = funcs.fft(u_d, copy=copy)
     funcs.split_prop_kernel(a, a_d, funcs.kz_gpu)
@@ -177,7 +177,7 @@ def split_prop(u, u_d, copy=False):
 
 def merge_grad(ufg, ubg, copy=False):
     param_check(uf_grad=ufg, ub_grad=ubg)
-    funcs = get_funcs(ufg, config.res, model="ssnp")
+    funcs = get_funcs(ufg, model="ssnp")
     afg = funcs.fft(ufg, copy=copy)
     abg = funcs.fft(ubg, copy=copy)
     funcs.merge_grad_kernel(afg, abg, funcs.kz_gpu)
@@ -186,17 +186,20 @@ def merge_grad(ufg, ubg, copy=False):
     return ug, u_dg
 
 
-def get_funcs(arr_like, res, model):
+def get_funcs(arr_like, config=None, *, model="any"):
     global __funcs_cache
     model = model.lower()
     shape = tuple(arr_like.shape)
-    res = tuple(res)
+    if config is None:
+        config = global_config
+
+    res = config.res
     if model == "any":
         try:
             key = (shape, res, "ssnp")
             return __funcs_cache[key]
         except KeyError:
-            return get_funcs(arr_like, res, "bpm")
+            return get_funcs(arr_like, config, model="bpm")
 
     key = (shape, res, model)
     try:

@@ -1,7 +1,7 @@
 from pycuda.gpuarray import GPUArray
 from typing import Literal, Optional, List, Union
 import numpy as np
-from .utils import Multipliers
+from ssnp.utils import Multipliers
 
 G_PRO = Union[GPUArray, property]
 
@@ -43,6 +43,8 @@ class BeamArray:
     def binary_pupil(self, na: float): ...
 
     def mul(self, arr: GPUArray, *, hold: BeamArray = None, track=False): ...
+
+    def a_mul(self, arr: GPUArray, *, hold: BeamArray = None, track=False): ...
 
     def __imul__(self, other): ...
 
