@@ -55,13 +55,26 @@ def bpm_step(u, dz, n=None, output=None):
 
 
 def bpm_grad_bp(u, ug, dz, n=None, ng=None):
-    param_check(u_1=u, ug=ug, n=n, ng=ng)
+    param_check(u_1=u, u_grad=ug, n=n, n_grad=ng)
     funcs: BPMFuncs = get_funcs(ug, config.res, model="bpm")
     if n is not None:
         funcs.scatter_g(u, n, ug, ng, dz)
     ag = funcs.fft(ug)
     funcs.diffract_g(ag, dz)
     funcs.ifft(ag)
+    return ng
+
+
+def ssnp_grad_bp(u, ug, u_dg, dz, n=None, ng=None):
+    param_check(u_1=u, u_grad=ug, u_d_grad=u_dg, n=n, n_grad=ng)
+    funcs: SSNPFuncs = get_funcs(ug, config.res, model="ssnp")
+    if n is not None:
+        funcs.scatter_g(u, n, ug, u_dg, ng, dz)
+    ag = funcs.fft(ug)
+    a_dg = funcs.fft(u_dg)
+    funcs.diffract_g(ag, a_dg, dz)
+    funcs.ifft(ag)
+    funcs.ifft(a_dg)
     return ng
 
 
@@ -160,6 +173,17 @@ def split_prop(u, u_d, copy=False):
     uf = funcs.ifft(a)
     ud = funcs.ifft(a_d)
     return uf, ud
+
+
+def merge_grad(ufg, ubg, copy=False):
+    param_check(uf_grad=ufg, ub_grad=ubg)
+    funcs = get_funcs(ufg, config.res, model="ssnp")
+    afg = funcs.fft(ufg, copy=copy)
+    abg = funcs.fft(ubg, copy=copy)
+    funcs.merge_grad_kernel(afg, abg, funcs.kz_gpu)
+    ug = funcs.ifft(afg)
+    u_dg = funcs.ifft(abg)
+    return ug, u_dg
 
 
 def get_funcs(arr_like, res, model):

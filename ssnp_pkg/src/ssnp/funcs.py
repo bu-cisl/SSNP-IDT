@@ -151,6 +151,8 @@ class SSNPFuncs(Funcs):
         preamble='#include "cuComplex.h"'
     )
     split_prop_kernel = elementwise.ElementwiseKernel(
+        # ab = (a + I a_d / kz) / 2
+        # af = a - ab = (a - I a_d / kz) / 2
         "double2 *a, double2 *a_d, double *kz",
         """
         temp.x = (cuCreal(a[i]) - cuCimag(a_d[i])/kz[i])*0.5;
@@ -162,11 +164,27 @@ class SSNPFuncs(Funcs):
         preamble='#include "cuComplex.h"'
     )
     merge_prop_kernel = elementwise.ElementwiseKernel(
+        # a = af + ab
+        # a_d = (af - ab) * I kz
         "double2 *af, double2 *ab, double *kz",
         """
         temp = cuCsub(af[i], ab[i]);
         af[i] = cuCadd(af[i], ab[i]);
         ab[i] = make_cuDoubleComplex(-cuCimag(temp)*kz[i], cuCreal(temp)*kz[i]);
+        """,
+        loop_prep="cuDoubleComplex temp",
+        preamble='#include "cuComplex.h"'
+    )
+    merge_grad_kernel = elementwise.ElementwiseKernel(
+        # ag = (afg + abg) / 2
+        # a_dg = (afg - abg) / 2 * I / kz
+        "double2 *afg, double2 *abg, double *kz",
+        """
+        afg[i].x *= 0.5; afg[i].y *= 0.5;
+        abg[i].x *= 0.5; abg[i].y *= 0.5;
+        temp = cuCsub(afg[i], abg[i]);
+        afg[i] = cuCadd(afg[i], abg[i]);
+        abg[i] = make_cuDoubleComplex(-cuCimag(temp)/kz[i], cuCreal(temp)/kz[i]);
         """,
         loop_prep="cuDoubleComplex temp",
         preamble='#include "cuComplex.h"'
@@ -184,16 +202,31 @@ class SSNPFuncs(Funcs):
             p_mat = [np.cos(kz * dz), np.sin(kz * dz) / kz,
                      -np.sin(kz * dz) * kz, np.cos(kz * dz)]
             p_mat = [gpuarray.to_gpu((i * eva).astype(np.complex128)) for i in p_mat]
+            phase_factor = (2 * np.pi * res[2]) ** 2 * dz
             q_op = elementwise.ElementwiseKernel(
                 "double2 *u, double2 *ud, double *n_",
                 f"""
-                    temp = {(2 * np.pi * res[2]) ** 2 * dz} * n_[i] * ({2 * n0} + n_[i]);
-                    ud[i].x -= temp*u[i].x;
-                    ud[i].y -= temp*u[i].y;
+                    temp = {phase_factor} * n_[i] * ({2 * n0} + n_[i]);
+                    ud[i].x -= temp * u[i].x;
+                    ud[i].y -= temp * u[i].y;
                 """,
                 loop_prep="double temp",
             )
-            new_prop = {"P": p_mat, "Q": q_op}
+            q_op_g = elementwise.ElementwiseKernel(
+                "double2 *u, double *n_, double2 *ug, double2 *udg, double *n_g",
+                # Forward: ud = ud - temp * u
+                # ng = Re{-udg * conj(u) * (d_temp(n) / d_n)}
+                f"""
+                    temp = {phase_factor} * n_[i] * ({2 * n0} + n_[i]);
+                    ug[i].x -= temp * udg[i].x;
+                    ug[i].y -= temp * udg[i].y;
+                    n_g[i] = -(udg[i].x * u[i].x + udg[i].y * u[i].y) * {phase_factor} * ({2 * n0} + 2 * n_[i])
+                """,
+                loop_prep="double temp",
+                preamble='#include "cuComplex.h"'
+            )
+            new_prop = {"P": p_mat, "Pg": [p_mat[0].conj(), p_mat[2].conj(), p_mat[1].conj(), p_mat[3].conj()],
+                        "Q": q_op, "Qg": q_op_g}
             self._prop_cache[key] = new_prop
             return new_prop
 
@@ -202,6 +235,12 @@ class SSNPFuncs(Funcs):
 
     def scatter(self, u, u_d, n, dz):
         self._get_prop(dz)["Q"](u, u_d, n)
+
+    def diffract_g(self, ag, a_dg, dz):
+        self.__fused_mam_callable(ag, a_dg, *self._get_prop(dz)["Pg"])
+
+    def scatter_g(self, u, n, ug, u_dg, ng, dz):
+        self._get_prop(dz)["Qg"](u, n, ug, u_dg, ng)
 
 
 class BPMFuncs(Funcs):

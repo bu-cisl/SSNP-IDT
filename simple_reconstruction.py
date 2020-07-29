@@ -37,8 +37,9 @@ for step in range(5):
     print(f"Step: {step}")
     for num in range(8):
         beam.forward = u_list[num]
-        beam.bpm(1, n, track=True)
-        beam.bpm(-len(n) / 2, track=True)
+        beam.backward = 0
+        beam.ssnp(1, n, track=True)
+        beam.ssnp(-len(n) / 2, track=True)
         beam.binary_pupil(0.6501)
         loss = beam.forward_mse_loss(mea[num], track=True)
         print(f"dir {num}, loss = {loss}")
@@ -48,4 +49,4 @@ for step in range(5):
         n = gpuarray.maximum(n, 0, out=n)
 print(time() - t)
 
-ssnp.write("bpm_recbb.tiff", n, scale=1, pre_operator=lambda x: x)
+ssnp.write("ssnp_recbb.tiff", n, scale=1, pre_operator=lambda x: x)

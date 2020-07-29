@@ -9,7 +9,7 @@ from pycuda.gpuarray import GPUArray
 from warnings import warn
 from .calc import split_prop as calc_split, merge_prop as calc_merge, get_multiplier
 from .calc import ssnp_step, bpm_step, binary_pupil as calc_pupil, reduce_mse
-from .calc import bpm_grad_bp, reduce_mse_grad, u_mul_grad_bp
+from .calc import bpm_grad_bp, reduce_mse_grad, u_mul_grad_bp, ssnp_grad_bp, merge_grad
 from .utils import param_check
 
 
@@ -185,6 +185,7 @@ class BeamArray:
         # output shape checking/setting
         scatter_num = 0
         ug = None
+        u_dg = None
         for op in self._tape:
             if op[0] in {'ssnp', 'bpm'} and op[-1] is not None:
                 scatter_num += 1
@@ -203,7 +204,7 @@ class BeamArray:
                 ug = self._get_array()
                 reduce_mse_grad(self.forward, op[1], output=ug)
 
-            elif op[0] in {"bpm", "u*"}:
+            elif op[0] in {"bpm", "ssnp", "u*"}:
                 if ug is None:
                     raise ValueError("no reduce operation")
 
@@ -240,6 +241,19 @@ class BeamArray:
                         scatter_num -= 1
                         bpm_grad_bp(u, ug, dz, n, output[scatter_num])
                         self.recycle_array(u)
+                if op[0] == "ssnp":
+                    _, u, _, dz, n = op
+                    if u_dg is None and ug is not None:
+                        ufg = ug
+                        ubg = self._get_array()
+                        ubg.fill(np.array(0, self.dtype))
+                        u, u_dg = merge_grad(ufg, ubg)
+                    if n is None:
+                        ssnp_grad_bp(u, ug, u_dg, dz)
+                    else:
+                        scatter_num -= 1
+                        ssnp_grad_bp(u, ug, u_dg, dz, n, output[scatter_num])
+                        self.recycle_array(u)
 
                 elif op[0] == "u*":
                     _, mul = op
@@ -247,7 +261,10 @@ class BeamArray:
             else:
                 raise NotImplementedError(f"unknown operation {op[0]}")
         assert scatter_num == 0
-        self.recycle_array(ug)
+        if ug is not None:
+            self.recycle_array(ug)
+        if u_dg is not None:
+            self.recycle_array(u_dg)
         self.ops_number["remainder"] = self.ops_number["current"] = self.ops_number["max"]
         return output
 
@@ -342,10 +359,14 @@ class BeamArray:
             elif info[0] == 'ssnp':
                 ssnp_step(info[1], info[2], var_dz, var_n)
                 if track:
-                    u_save = self._get_array()
-                    u_save.set(info[1])
-                    ud_save = self._get_array()
-                    ud_save.set(info[2])
+                    if var_n is None:
+                        u_save = None
+                    else:
+                        u_save = self._get_array()
+                        u_save.set(info[1])
+                    # ud_save = self._get_array()
+                    # ud_save.set(info[2])
+                    ud_save = None
                     self._tape.append(('ssnp', u_save, ud_save, var_dz, var_n))
 
         if n is None:
