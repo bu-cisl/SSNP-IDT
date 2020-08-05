@@ -91,22 +91,23 @@ class Funcs:
     def scatter(self, *args):
         raise NotImplementedError
 
-    # def binary_pupil(self, u, na):
-    #     key = round(na * 1000)
-    #     try:
-    #         mask = self._pupil_cache[key]
-    #     except KeyError:
-    #         mask = np.greater(_c_gamma(u.shape, self.res), np.sqrt(1 - na ** 2))
-    #         mask = mask.astype(np.complex128)
-    #         mask = gpuarray.to_gpu(mask)
-    #         self._pupil_cache[key] = mask
-    #     self.fft(u)
-    #     u *= mask
-    #     self.ifft(u)
-    #     return u
+    def _get_prop(self, dz):
+        """
+            P: 2D angular spectrum transmittance numpy array(s). Evanescent wave removed:
+            For 0.98<N.A.<1, decrease to 1~1/e per step;
+            For N.A.>1 decrease to 1/e per step
+
+            Q: scattering operation, different between SSNP & BPM
+
+            Pg/Qg: transposed array/operation of P/Q
+
+            :return: Dictionary of P, Q, Pg, Qg
+        """
+        raise NotImplementedError
 
     @staticmethod
     def conj(arr: GPUArray):
+        """copy from GPUArray.conj(self), do conj in-place"""
         dtype = arr.dtype
         if not arr.flags.forc:
             raise RuntimeError("only contiguous arrays may "
@@ -125,23 +126,6 @@ class Funcs:
             mem = gpuarray.empty_like(arr_like)
             Funcs.__temp_memory_pool[key] = mem
             return mem
-
-    # @staticmethod
-    # def reduce_mse_cr(arr1, arr2):
-    #     Funcs.__mse_cr_kernel(arr1, arr2)
-    #
-    # @staticmethod
-    # def reduce_mse_cc(arr1, arr2):
-    #     Funcs.__mse_cc_kernel(arr1, arr2)
-
-
-#     """
-#         For 0.98<N.A.<1, decrease to 1~1/e per step
-#
-#         For N.A.>1 decrease to 1/e per step
-#
-#         :return: a 2D angular spectrum transmittance numpy array
-#     """
 
 
 class SSNPFuncs(Funcs):

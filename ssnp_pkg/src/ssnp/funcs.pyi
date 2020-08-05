@@ -1,13 +1,8 @@
-from typing import Callable
-
 import numpy as np
 from pycuda.gpuarray import GPUArray
 from pycuda.elementwise import ElementwiseKernel
 from reikna.core.computation import ComputationCallable
 from .utils import Multipliers
-
-
-# def _c_gamma(shape, res) -> np.ndarray: ...
 
 
 class Funcs:
@@ -33,6 +28,8 @@ class Funcs:
     def diffract(self, *args) -> None: ...
 
     def scatter(self, *args) -> None: ...
+
+    def _get_prop(self, dz): ...
 
     @staticmethod
     def get_temp_mem(arr_like: GPUArray, index=0): ...
