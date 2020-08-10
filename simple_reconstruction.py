@@ -23,6 +23,7 @@ NA = 0.65
 u_list = []
 u_plane = ssnp.read("plane", np.complex128, shape=n.shape[1:])
 beam = BeamArray(u_plane, total_ops=len(n))
+pupil = beam.multiplier.binary_pupil(0.6501, gpu=True)
 
 for num in range(8):
     xy_theta = num / 8 * 2 * np.pi
@@ -40,7 +41,7 @@ for step in range(5):
         beam.backward = 0
         beam.ssnp(1, n, track=True)
         beam.ssnp(-len(n) / 2, track=True)
-        beam.binary_pupil(0.6501)
+        beam.a_mul(pupil, track=True)
         loss = beam.forward_mse_loss(mea[num], track=True)
         print(f"dir {num}, loss = {loss}")
         beam.n_grad(ng)
