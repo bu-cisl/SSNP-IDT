@@ -5,6 +5,7 @@ from pycuda import gpuarray
 from ssnp.funcs import BPMFuncs, SSNPFuncs, Funcs
 from ssnp.utils import param_check
 from ssnp.const import config as global_config
+from warnings import warn
 
 
 def ssnp_step(u, u_d, dz, n=None, output=None):
@@ -59,9 +60,8 @@ def bpm_grad_bp(u, ug, dz, n=None, ng=None):
     funcs: BPMFuncs = get_funcs(ug, model="bpm")
     if n is not None:
         funcs.scatter_g(u, n, ug, ng, dz)
-    ag = funcs.fft(ug)
-    funcs.diffract_g(ag, dz)
-    funcs.ifft(ag)
+    with funcs.fourier(ug) as ag:
+        funcs.diffract_g(ag, dz)
     return ng
 
 
@@ -70,11 +70,8 @@ def ssnp_grad_bp(u, ug, u_dg, dz, n=None, ng=None):
     funcs: SSNPFuncs = get_funcs(ug, model="ssnp")
     if n is not None:
         funcs.scatter_g(u, n, ug, u_dg, ng, dz)
-    ag = funcs.fft(ug)
-    a_dg = funcs.fft(u_dg)
-    funcs.diffract_g(ag, a_dg, dz)
-    funcs.ifft(ag)
-    funcs.ifft(a_dg)
+    with funcs.fourier(ug) as ag, funcs.fourier(u_dg) as a_dg:
+        funcs.diffract_g(ag, a_dg, dz)
     return ng
 
 
@@ -107,6 +104,8 @@ def reduce_mse_grad(u, measurement, output=None):
 
 
 def binary_pupil(u, na, multiplier=None):
+    warn("binary_pupil is deprecated, directly use a_mul(Multiplier.binary_pupil()) instead",
+         DeprecationWarning, stacklevel=2)
     funcs = get_funcs(u, model="any")
     a = funcs.fft(u)
     if multiplier is None:
@@ -136,6 +135,8 @@ def pure_forward_d(u, output=None):
     :param output: (optional) output memory, must have same shape and dtype
     :return: z partial derivative of u
     """
+    warn("pure_forward_d is deprecated, use BeamArray.backward=0 instead",
+         DeprecationWarning, stacklevel=2)
     funcs = get_funcs(u, model="ssnp")
     af = funcs.fft(u, output=funcs.get_temp_mem(u))
     if output is None:

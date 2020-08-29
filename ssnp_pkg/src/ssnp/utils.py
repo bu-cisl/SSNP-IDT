@@ -58,18 +58,21 @@ class Multipliers:
         self._gpu_cache = {}
 
     @_cache_array
-    def tilt(self, c_ab, *, trunc, periodic_params=None):
+    def tilt(self, c_ab, *, trunc, periodic_params=None, c_ab_out=None):
         res = self.res
         xy_size = self._xy_size
         norm = tuple(xy_size[i] * res[i] for i in (0, 1))  # to be confirmed: * config.n0
         kernel = None
         if trunc:
             c_ab = [math.trunc(c_ab[i] * norm[i]) / norm[i] for i in (0, 1)]
-            print(c_ab)
         elif periodic_params is not None:
             kernel = self.gaussian(periodic_params[0], (0.5, 0.5), gpu=False)
             kernel = np.fft.fft2(np.fft.fftshift(kernel))
         c_ab = tuple(float(i) for i in c_ab)
+        if c_ab_out is not None:
+            for i in range(2):
+                c_ab_out[i] = c_ab[i]
+
         key = ("t", c_ab, res, None if periodic_params is None else periodic_params[0])
 
         def calc():
@@ -84,7 +87,7 @@ class Multipliers:
                 phase = np.ascontiguousarray(phase)
             # normalize by center point value
             phase /= phase[tuple(i // 2 for i in phase.shape)]
-            print(phase[tuple(i // 2 for i in phase.shape)])
+            np.testing.assert_almost_equal(phase[tuple(i // 2 for i in phase.shape)], 1)
             return phase
 
         return key, calc
@@ -216,7 +219,6 @@ class Multipliers:
     @_cache_array
     def gaussian(self, sigma, mu=(0, 0)):
         xy_size = self._xy_size
-        res = self.res
         sigma = float(sigma)
         mu = tuple(float(i) for i in mu)
         key = ("ga", round(sigma * 100), tuple(round(i * 100) for i in mu))
