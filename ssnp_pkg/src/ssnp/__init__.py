@@ -25,6 +25,5 @@ VERSION = '0.0.1rc4'
 import pycuda
 import pycuda.autoinit
 from ssnp.data import read, write
-from ssnp.const import config
 from ssnp.beam import BeamArray
-from ssnp.utils import Multipliers
+from ssnp.utils import Multipliers, config

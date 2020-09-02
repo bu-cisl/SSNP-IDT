@@ -3,8 +3,7 @@ __funcs_cache = {}
 import numpy as np
 from pycuda import gpuarray
 from ssnp.funcs import BPMFuncs, SSNPFuncs, Funcs
-from ssnp.utils import param_check
-from ssnp.const import config as global_config
+from ssnp.utils import param_check, config as global_config
 from warnings import warn
 
 
@@ -49,9 +48,6 @@ def bpm_step(u, dz, n=None, output=None):
     u = funcs.ifft(a)
     if n is not None:
         funcs.scatter(u, n, dz)
-    # if not PERIODIC_BOUNDARY:
-    #     absorb = tf.constant(_outflow_absorb(), DATA_TYPE)
-    #     u *= absorb
     return u
 
 
@@ -103,16 +99,16 @@ def reduce_mse_grad(u, measurement, output=None):
     return output
 
 
-def binary_pupil(u, na, multiplier=None):
-    warn("binary_pupil is deprecated, directly use a_mul(Multiplier.binary_pupil()) instead",
-         DeprecationWarning, stacklevel=2)
-    funcs = get_funcs(u, model="any")
-    a = funcs.fft(u)
-    if multiplier is None:
-        a *= funcs.multiplier.binary_pupil(na, gpu=True)
-    else:
-        a *= multiplier.binary_pupil(na, gpu=True)
-    return funcs.ifft(a)
+# def binary_pupil(u, na, multiplier=None):
+#     warn("binary_pupil is deprecated, directly use a_mul(Multiplier.binary_pupil()) instead",
+#          DeprecationWarning, stacklevel=2)
+#     funcs = get_funcs(u, model="any")
+#     a = funcs.fft(u)
+#     if multiplier is None:
+#         a *= funcs.multiplier.binary_pupil(na, gpu=True)
+#     else:
+#         a *= multiplier.binary_pupil(na, gpu=True)
+#     return funcs.ifft(a)
 
 
 def get_multiplier(arr_like):
@@ -135,7 +131,7 @@ def pure_forward_d(u, output=None):
     :param output: (optional) output memory, must have same shape and dtype
     :return: z partial derivative of u
     """
-    warn("pure_forward_d is deprecated, use BeamArray.backward=0 instead",
+    warn("pure_forward_d(u) is deprecated, use merge_prop(u, zero) instead",
          DeprecationWarning, stacklevel=2)
     funcs = get_funcs(u, model="ssnp")
     af = funcs.fft(u, output=funcs.get_temp_mem(u))

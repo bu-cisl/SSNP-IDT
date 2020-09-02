@@ -126,8 +126,9 @@ class BeamArray:
         if self._u2 is not None:
             self.split_prop()
         if value is None:
-            self.recycle_array(self._u2)
-            self._u2 = None
+            if self._u2 is not None:
+                self.recycle_array(self._u2)
+                self._u2 = None
         else:
             if self._u2 is None:
                 self._u2 = self._get_array()
@@ -145,8 +146,9 @@ class BeamArray:
         if self._u2 is not None:
             self.merge_prop()
         if value is None:
-            self.recycle_array(self._u2)
-            self._u2 = None
+            if self._u2 is not None:
+                self.recycle_array(self._u2)
+                self._u2 = None
         else:
             if self._u2 is None:
                 self._u2 = self._get_array()
@@ -279,9 +281,7 @@ class BeamArray:
         return output
 
     def binary_pupil(self, na):
-        calc.binary_pupil(self._u1, na)
-        if self._u2 is not None:
-            calc.binary_pupil(self._u2, na)
+        self.a_mul(self.multiplier.binary_pupil(na, gpu=True))
 
     def mul(self, arr, *, hold=None, track=False):
         """

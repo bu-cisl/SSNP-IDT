@@ -1,5 +1,5 @@
 from numbers import Real
-from typing import Tuple, Callable, overload, Literal
+from typing import Tuple, Callable, overload, Literal, Union
 
 import numpy as np
 from pycuda.gpuarray import GPUArray
@@ -60,3 +60,11 @@ class Multipliers:
 
     @overload
     def gaussian(self, sigma: Real, mu: Tuple[Real, Real] = (0, 0), *, gpu: Literal[False] = False) -> np.ndarray: ...
+
+
+class Consts:
+    res: Union[Tuple[float, float, float], property]
+    n0 = 1
+
+
+config: Consts
