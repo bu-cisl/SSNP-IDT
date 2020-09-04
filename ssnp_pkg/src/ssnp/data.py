@@ -36,7 +36,7 @@ def predefined_read(name, shape, dtype=None):
 
 def tiff_read(path):
     """
-    Import a TIFF file to ``tf.Tensor``
+    Import a TIFF file as numpy array
 
     :param path: Target file path
     :return: A tensor constant

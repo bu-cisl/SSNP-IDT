@@ -7,7 +7,7 @@ Split-step non-paraxial beam propagation method
 * Forward model calculation based on CUDA
 * Read/write data of common file type
 * Gradient calculation
-* Image reconstruction with regularization (working)
+* Image reconstruction with regularization
 
 ## Reference
 

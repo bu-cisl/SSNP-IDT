@@ -6,9 +6,9 @@ SSNP
 Features
 
 * Forward model calculation based on CUDA
-* Common type of file read/write
-* Gradient calculation (working)
-* Image reconstruction (working)
+* Read/write data of common file type
+* Gradient calculation
+* Image reconstruction with regularization
 """
 
 import sys
@@ -18,8 +18,8 @@ if sys.version_info.major < 3:
 
 import warnings
 
-if sys.version_info < (3, 6):
-    warnings.warn("Untested python version. Please use python>=3.6")
+if sys.version_info < (3, 8):
+    warnings.warn("Untested python version. Please use python>=3.8")
 
 VERSION = '0.0.1rc4'
 import pycuda
