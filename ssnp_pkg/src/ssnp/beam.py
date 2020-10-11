@@ -304,16 +304,17 @@ class BeamArray:
                 self._tape.append(("u*", arr))
 
     def a_mul(self, arr, hold=None, track=False):
+        fourier = self._fft_funcs.fourier
         param_check(field=self._u1, arr=arr, hold=None if hold is None else hold._u1)
         if hold is not None:
             self.__isub__(hold)
             self.a_mul(arr, track=track)
             self.__iadd__(hold)
         else:
-            with self._fft_funcs.fourier(self._u1):
+            with fourier(self._u1):
                 self._u1 *= arr
             if self._u2 is not None:
-                with self._fft_funcs.fourier(self._u2):
+                with fourier(self._u2):
                     self._u2 *= arr
             if track:
                 self._tape.append(("a*", arr))
