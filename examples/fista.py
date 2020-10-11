@@ -1,4 +1,3 @@
-import os
 import numpy as np
 import pycuda.cumath
 import pycuda.reduction
@@ -8,9 +7,6 @@ import pycuda.reduction
 from pycuda.gpuarray import GPUArray
 from functools import lru_cache
 
-# os.environ['PATH'] += r";C:\Program Files (x86)\Microsoft Visual Studio\2019\Community" \
-#                       r"\VC\Tools\MSVC\14.25.28610\bin\Hostx64\x64"
-# pycuda.compiler.DEFAULT_NVCC_FLAGS = ['-Xcompiler', '/wd 4819']
 import ssnp
 from ssnp.calc import get_funcs
 

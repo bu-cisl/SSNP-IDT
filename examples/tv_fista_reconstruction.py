@@ -12,7 +12,7 @@ if platform.system() == 'Windows':
 
 import ssnp
 from ssnp import BeamArray
-from fista import prox_tv, get_q, tv_cost
+from .fista import prox_tv, get_q, tv_cost
 
 ssnp.config.res = (0.1, 0.1, 0.1)
 ZERO = np.zeros((), dtype=np.double)
