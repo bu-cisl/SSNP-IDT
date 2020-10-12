@@ -13,47 +13,53 @@ thr = api.Thread(s)
 
 class Funcs:
     __temp_memory_pool = {}
-    reduce_mse_cr = reduction.ReductionKernel(
-        dtype_out=np.double, neutral=0,
-        reduce_expr="a+b",
-        map_expr="(cuCabs(x[i]) - y[i]) * (cuCabs(x[i]) - y[i])",
-        arguments="double2 *x, double *y",
-        preamble='#include "cuComplex.h"'
-    )
-    reduce_mse_cc = reduction.ReductionKernel(
-        dtype_out=np.double, neutral=0,
-        reduce_expr="a+b",
-        map_expr="cuCabs(cuCsub(x[i], y[i])) * cuCabs(cuCsub(x[i], y[i]))",
-        arguments="double2 *x, double2 *y",
-        preamble='#include "cuComplex.h"'
-    )
-    mse_cc_grad = elementwise.ElementwiseKernel(
-        "double2 *u, double2 *m, double2 *out",
-        """
-        out[i] = cuCsub(u[i], m[i]);
-        out[i].x *= 2; out[i].y *= 2;
-        """,
-        preamble='#include "cuComplex.h"'
-    )
-    mse_cr_grad = elementwise.ElementwiseKernel(
-        "double2 *u, double *m, double2 *out",
-        """
-        temp = 2 * (1 - m[i] / cuCabs(u[i]));
-        out[i].x = temp * u[i].x; out[i].y = temp * u[i].y;
-        """,
-        loop_prep="double temp",
-        preamble='#include "cuComplex.h"'
-    )
-    mul_grad_bp = elementwise.ElementwiseKernel(
-        "double2 *ug, double2 *mul",
-        """
-        ug[i] = cuCmul(ug[i], cuConj(mul[i]))
-        """,
-        preamble='#include "cuComplex.h"'
-    )
+    reduce_mse_cr = None
+    reduce_mse_cc = None
+    mse_cc_grad = None
+    mse_cr_grad = None
+    mul_grad_bp = None
 
     def __init__(self, arr_like, res, n0):
         shape = tuple(arr_like.shape)
+        if Funcs.reduce_mse_cr is None:
+            Funcs.reduce_mse_cr = reduction.ReductionKernel(
+                dtype_out=np.double, neutral=0,
+                reduce_expr="a+b",
+                map_expr="(cuCabs(x[i]) - y[i]) * (cuCabs(x[i]) - y[i])",
+                arguments="double2 *x, double *y",
+                preamble='#include "cuComplex.h"'
+            )
+            Funcs.reduce_mse_cc = reduction.ReductionKernel(
+                dtype_out=np.double, neutral=0,
+                reduce_expr="a+b",
+                map_expr="cuCabs(cuCsub(x[i], y[i])) * cuCabs(cuCsub(x[i], y[i]))",
+                arguments="double2 *x, double2 *y",
+                preamble='#include "cuComplex.h"'
+            )
+            Funcs.mse_cc_grad = elementwise.ElementwiseKernel(
+                "double2 *u, double2 *m, double2 *out",
+                """
+                out[i] = cuCsub(u[i], m[i]);
+                out[i].x *= 2; out[i].y *= 2;
+                """,
+                preamble='#include "cuComplex.h"'
+            )
+            Funcs.mse_cr_grad = elementwise.ElementwiseKernel(
+                "double2 *u, double *m, double2 *out",
+                """
+                temp = 2 * (1 - m[i] / cuCabs(u[i]));
+                out[i].x = temp * u[i].x; out[i].y = temp * u[i].y;
+                """,
+                loop_prep="double temp",
+                preamble='#include "cuComplex.h"'
+            )
+            Funcs.mul_grad_bp = elementwise.ElementwiseKernel(
+                "double2 *ug, double2 *mul",
+                """
+                ug[i] = cuCmul(ug[i], cuConj(mul[i]))
+                """,
+                preamble='#include "cuComplex.h"'
+            )
         self._fft_callable = FFT(arr_like).compile(thr)
         self.shape = shape
         self._prop_cache = {}
@@ -138,7 +144,8 @@ class SSNPFuncs(Funcs):
         a[i] = temp;
         """,
         loop_prep="cuDoubleComplex temp",
-        preamble='#include "cuComplex.h"'
+        preamble='#include "cuComplex.h"',
+        name='fused_mam'
     )
     split_prop_kernel = elementwise.ElementwiseKernel(
         # ab = (a + I a_d / kz) / 2
@@ -201,6 +208,7 @@ class SSNPFuncs(Funcs):
                     ud[i].y -= temp * u[i].y;
                 """,
                 loop_prep="double temp",
+                name="ssnp_q"
             )
             q_op_g = elementwise.ElementwiseKernel(
                 "double2 *u, double *n_, double2 *ug, double2 *udg, double *n_g",
@@ -213,7 +221,8 @@ class SSNPFuncs(Funcs):
                     n_g[i] = -(udg[i].x * u[i].x + udg[i].y * u[i].y) * {phase_factor} * ({2 * n0} + 2 * n_[i])
                 """,
                 loop_prep="double temp",
-                preamble='#include "cuComplex.h"'
+                preamble='#include "cuComplex.h"',
+                name="ssnp_qg"
             )
             new_prop = {"P": p_mat, "Pg": [p_mat[0].conj(), p_mat[2].conj(), p_mat[1].conj(), p_mat[3].conj()],
                         "Q": q_op, "Qg": q_op_g}

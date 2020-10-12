@@ -51,3 +51,6 @@ for step in range(5):
 print(time() - t)
 
 ssnp.write("ssnp_recbb.tiff", n, scale=1, pre_operator=lambda x: x)
+
+import pycuda.driver
+pycuda.driver.stop_profiler()
