@@ -3,6 +3,7 @@ import os
 from time import time
 import platform
 import pycuda.compiler
+t = time()
 
 if platform.system() == 'Windows':
     os.environ['PATH'] += r";C:\Program Files (x86)\Microsoft Visual Studio\2019\Community" \
@@ -16,7 +17,6 @@ n = ssnp.read("bb.tiff", np.double)
 n *= 0.01
 NA = 0.65
 steps = []
-t = time()
 u = ssnp.read("plane", np.complex128, shape=n.shape[1:])
 beam = ssnp.BeamArray(u)
 

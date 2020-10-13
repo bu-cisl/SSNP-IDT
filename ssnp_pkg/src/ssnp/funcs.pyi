@@ -27,6 +27,12 @@ class Funcs:
 
     def __init__(self, arr_like: GPUArray, res, n0, stream: Stream = None): ...
 
+    @staticmethod
+    def _compile_fft(shape, dtype, stream): ...
+
+    @staticmethod
+    def _get_stream(ctx): ...
+
     def fft(self, arr: GPUArray, output: GPUArray = None, copy: bool = False, inverse=False): ...
 
     def ifft(self, arr: GPUArray, output: GPUArray = None, copy: bool = False): ...
@@ -70,7 +76,6 @@ class SSNPFuncs(Funcs):
     _merge_prop_krn: ElementwiseKernel
     _split_prop_krn: ElementwiseKernel
     _merge_grad_krn: ElementwiseKernel
-
 
     def merge_prop(self, af, ab): ...
 

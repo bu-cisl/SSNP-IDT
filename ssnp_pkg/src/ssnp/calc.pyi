@@ -1,6 +1,6 @@
 from typing import Tuple, Literal, Union
 from pycuda.driver import Stream
-from .funcs import BPMFuncs, SSNPFuncs
+from .funcs import BPMFuncs, SSNPFuncs, Funcs
 from pycuda.gpuarray import GPUArray
 import numpy as np
 from numbers import Real
@@ -53,4 +53,4 @@ def merge_grad(ufg: GPUArray, ubg: GPUArray, copy: bool = False,
 
 def get_funcs(arr_like: GPUArray, config: Config = None, *,
               model: Literal['ssnp', 'bpm', 'any', 'BPM', 'SSNP', 'Any', 'ANY'] = 'any',
-              stream: Stream = None) -> Union[BPMFuncs, SSNPFuncs]: ...
+              stream: Stream = None) -> Union[BPMFuncs, SSNPFuncs, Funcs]: ...

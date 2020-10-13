@@ -5,7 +5,7 @@ import numpy as np
 import reikna.cluda as cluda
 from ssnp.utils import Multipliers
 from contextlib import contextmanager
-from functools import partial
+from functools import partial, lru_cache
 
 
 class Funcs:
@@ -57,15 +57,15 @@ class Funcs:
     def __init__(self, arr_like, res, n0, stream=None):
         shape = tuple(arr_like.shape)
         if stream is None:
-            stream = cuda.Stream()
+            ctx = cuda.Context.get_current()
+            stream = self._get_stream(ctx)
         self.stream = stream
         self.reduce_mse_cr = partial(self.reduce_mse_cr_krn, stream=stream)
         self.reduce_mse_cc = partial(self.reduce_mse_cc_krn, stream=stream)
         self.mse_cc_grad = partial(self.mse_cc_grad_krn, stream=stream)
         self.mse_cr_grad = partial(self.mse_cr_grad_krn, stream=stream)
         self.mul_grad_bp = partial(self.mul_grad_bp_krn, stream=stream)
-        thr = cluda.cuda_api().Thread(stream)
-        self._fft_callable = FFT(arr_like).compile(thr)
+        self._fft_callable = self._compile_fft(arr_like.shape, arr_like.dtype, stream)
         self.shape = shape
         self._prop_cache = {}
         self._pupil_cache = {}
@@ -77,6 +77,20 @@ class Funcs:
         self.kz = kz.astype(np.double)
         self.kz_gpu = gpuarray.to_gpu(kz)
         self.eva = np.exp(np.minimum((c_gamma - 0.2) * 5, 0))
+
+    @staticmethod
+    @lru_cache
+    def _compile_fft(shape, dtype, stream):
+        thr = cluda.cuda_api().Thread(stream)
+        arr_like = type("", (), {})()
+        arr_like.shape = shape
+        arr_like.dtype = dtype
+        return FFT(arr_like).compile(thr)
+
+    @staticmethod
+    @lru_cache
+    def _get_stream(ctx):
+        return cuda.Stream()
 
     def fft(self, arr, output=None, copy=False, inverse=False):
         if output is not None:

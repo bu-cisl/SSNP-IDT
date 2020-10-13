@@ -2,7 +2,7 @@ __funcs_cache = {}
 
 import numpy as np
 from pycuda import gpuarray
-from ssnp.funcs import BPMFuncs, SSNPFuncs
+from ssnp.funcs import BPMFuncs, SSNPFuncs, Funcs
 from ssnp.utils import param_check, config as global_config, Multipliers
 # from warnings import warn
 
@@ -192,19 +192,19 @@ def get_funcs(arr_like, config=None, *, model="any", stream=None):
         config = global_config
 
     res = config.res
-    if model == "any":
-        try:
-            key = (shape, res, "ssnp", stream)
-            return __funcs_cache[key]
-        except KeyError:
-            return get_funcs(arr_like, config, model="bpm", stream=stream)
+    # if model == "any":
+    #     try:
+    #         key = (shape, res, "ssnp", stream)
+    #         return __funcs_cache[key]
+    #     except KeyError:
+    #         return get_funcs(arr_like, config, model="bpm", stream=stream)
 
     key = (shape, res, model, stream)
     try:
         return __funcs_cache[key]
     except KeyError:
         try:
-            model = {"ssnp": SSNPFuncs, "bpm": BPMFuncs}[model]
+            model = {"ssnp": SSNPFuncs, "bpm": BPMFuncs, "any": Funcs}[model]
             funcs = model(arr_like, res, config.n0, stream)
         except KeyError:
             raise ValueError(f"unknown model {model}") from None
