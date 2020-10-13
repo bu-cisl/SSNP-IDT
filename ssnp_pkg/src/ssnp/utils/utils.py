@@ -19,7 +19,7 @@ def param_check(**kwargs):
                 raise ValueError(f"cannot match '{name}' shape {arr.shape} with '{name0}' shape {shape0}")
 
 
-class Consts:
+class Config:
     _res = None
     _n0 = 1
 
@@ -46,4 +46,4 @@ class Consts:
                 raise TypeError(f"'{key}' is invalid as a configuration item")
 
 
-config = Consts()
+config = Config()

@@ -1,42 +1,34 @@
-from pycuda import elementwise, gpuarray, driver, reduction
+from pycuda import elementwise, gpuarray, driver as cuda, reduction
 from pycuda.gpuarray import GPUArray
 from reikna.fft import FFT
 import numpy as np
 import reikna.cluda as cluda
 from ssnp.utils import Multipliers
 from contextlib import contextmanager
-
-s = driver.Stream()
-api = cluda.cuda_api()
-thr = api.Thread(s)
+from functools import partial
 
 
 class Funcs:
-    __temp_memory_pool = {}
-    reduce_mse_cr = None
-    reduce_mse_cc = None
-    mse_cc_grad = None
-    mse_cr_grad = None
-    mul_grad_bp = None
+    # __temp_memory_pool = {}
+    reduce_mse_cr_krn = None
 
-    def __init__(self, arr_like, res, n0):
-        shape = tuple(arr_like.shape)
-        if Funcs.reduce_mse_cr is None:
-            Funcs.reduce_mse_cr = reduction.ReductionKernel(
+    def __new__(cls, *args, **kwargs):
+        if cls.reduce_mse_cr_krn is None:
+            Funcs.reduce_mse_cr_krn = reduction.ReductionKernel(
                 dtype_out=np.double, neutral=0,
                 reduce_expr="a+b",
                 map_expr="(cuCabs(x[i]) - y[i]) * (cuCabs(x[i]) - y[i])",
                 arguments="double2 *x, double *y",
                 preamble='#include "cuComplex.h"'
             )
-            Funcs.reduce_mse_cc = reduction.ReductionKernel(
+            Funcs.reduce_mse_cc_krn = reduction.ReductionKernel(
                 dtype_out=np.double, neutral=0,
                 reduce_expr="a+b",
                 map_expr="cuCabs(cuCsub(x[i], y[i])) * cuCabs(cuCsub(x[i], y[i]))",
                 arguments="double2 *x, double2 *y",
                 preamble='#include "cuComplex.h"'
             )
-            Funcs.mse_cc_grad = elementwise.ElementwiseKernel(
+            Funcs.mse_cc_grad_krn = elementwise.ElementwiseKernel(
                 "double2 *u, double2 *m, double2 *out",
                 """
                 out[i] = cuCsub(u[i], m[i]);
@@ -44,7 +36,7 @@ class Funcs:
                 """,
                 preamble='#include "cuComplex.h"'
             )
-            Funcs.mse_cr_grad = elementwise.ElementwiseKernel(
+            Funcs.mse_cr_grad_krn = elementwise.ElementwiseKernel(
                 "double2 *u, double *m, double2 *out",
                 """
                 temp = 2 * (1 - m[i] / cuCabs(u[i]));
@@ -53,20 +45,33 @@ class Funcs:
                 loop_prep="double temp",
                 preamble='#include "cuComplex.h"'
             )
-            Funcs.mul_grad_bp = elementwise.ElementwiseKernel(
+            Funcs.mul_grad_bp_krn = elementwise.ElementwiseKernel(
                 "double2 *ug, double2 *mul",
                 """
                 ug[i] = cuCmul(ug[i], cuConj(mul[i]))
                 """,
                 preamble='#include "cuComplex.h"'
             )
+        return super().__new__(cls)
+
+    def __init__(self, arr_like, res, n0, stream=None):
+        shape = tuple(arr_like.shape)
+        if stream is None:
+            stream = cuda.Stream()
+        self.stream = stream
+        self.reduce_mse_cr = partial(self.reduce_mse_cr_krn, stream=stream)
+        self.reduce_mse_cc = partial(self.reduce_mse_cc_krn, stream=stream)
+        self.mse_cc_grad = partial(self.mse_cc_grad_krn, stream=stream)
+        self.mse_cr_grad = partial(self.mse_cr_grad_krn, stream=stream)
+        self.mul_grad_bp = partial(self.mul_grad_bp_krn, stream=stream)
+        thr = cluda.cuda_api().Thread(stream)
         self._fft_callable = FFT(arr_like).compile(thr)
         self.shape = shape
         self._prop_cache = {}
         self._pupil_cache = {}
         self.res = res
         self.n0 = n0
-        self.multiplier = Multipliers(shape, res)
+        self.multiplier = Multipliers(shape, res, stream)
         c_gamma = self.multiplier.c_gamma()
         kz = c_gamma * (2 * np.pi * res[2] * n0)
         self.kz = kz.astype(np.double)
@@ -111,31 +116,29 @@ class Funcs:
         """
         raise NotImplementedError
 
-    @staticmethod
-    def conj(arr: GPUArray):
+    def conj(self, arr: GPUArray):
         """copy from GPUArray.conj(self), do conj in-place"""
         dtype = arr.dtype
         if not arr.flags.forc:
             raise RuntimeError("only contiguous arrays may "
                                "be used as arguments to this operation")
         func = elementwise.get_conj_kernel(dtype)
-        func.prepared_call(arr._grid, arr._block,
-                           arr.gpudata, arr.gpudata,
-                           arr.mem_size)
+        func.prepared_async_call(arr._grid, arr._block, self.stream,
+                                 arr.gpudata, arr.gpudata, arr.mem_size)
 
-    @staticmethod
-    def get_temp_mem(arr_like: GPUArray, index=0):
-        key = (arr_like.shape, arr_like.dtype, index)
-        try:
-            return Funcs.__temp_memory_pool[key]
-        except KeyError:
-            mem = gpuarray.empty_like(arr_like)
-            Funcs.__temp_memory_pool[key] = mem
-            return mem
+    # @staticmethod
+    # def get_temp_mem(arr_like: GPUArray, index=0):
+    #     key = (arr_like.shape, arr_like.dtype, index)
+    #     try:
+    #         return Funcs.__temp_memory_pool[key]
+    #     except KeyError:
+    #         mem = gpuarray.empty_like(arr_like)
+    #         Funcs.__temp_memory_pool[key] = mem
+    #         return mem
 
 
 class SSNPFuncs(Funcs):
-    __fused_mam_callable = elementwise.ElementwiseKernel(
+    _fused_mam_callable_krn = elementwise.ElementwiseKernel(
         "double2 *a, double2 *b, "
         "double2 *p00, double2 *p01, double2 *p10, double2 *p11",
         """
@@ -147,7 +150,7 @@ class SSNPFuncs(Funcs):
         preamble='#include "cuComplex.h"',
         name='fused_mam'
     )
-    split_prop_kernel = elementwise.ElementwiseKernel(
+    _split_prop_krn = elementwise.ElementwiseKernel(
         # ab = (a + I a_d / kz) / 2
         # af = a - ab = (a - I a_d / kz) / 2
         "double2 *a, double2 *a_d, double *kz",
@@ -160,7 +163,7 @@ class SSNPFuncs(Funcs):
         loop_prep="cuDoubleComplex temp",
         preamble='#include "cuComplex.h"'
     )
-    merge_prop_kernel = elementwise.ElementwiseKernel(
+    _merge_prop_krn = elementwise.ElementwiseKernel(
         # a = af + ab
         # a_d = (af - ab) * I kz
         "double2 *af, double2 *ab, double *kz",
@@ -172,7 +175,7 @@ class SSNPFuncs(Funcs):
         loop_prep="cuDoubleComplex temp",
         preamble='#include "cuComplex.h"'
     )
-    merge_grad_kernel = elementwise.ElementwiseKernel(
+    _merge_grad_krn = elementwise.ElementwiseKernel(
         # ag = (afg + abg) / 2
         # a_dg = (afg - abg) / 2 * I / kz
         "double2 *afg, double2 *abg, double *kz",
@@ -230,16 +233,28 @@ class SSNPFuncs(Funcs):
             return new_prop
 
     def diffract(self, a, a_d, dz):
-        self.__fused_mam_callable(a, a_d, *self._get_prop(dz)["P"])
+        self._fused_mam_callable_krn(a, a_d, *self._get_prop(dz)["P"], stream=self.stream)
 
     def scatter(self, u, u_d, n, dz):
-        self._get_prop(dz)["Q"](u, u_d, n)
+        self._get_prop(dz)["Q"](u, u_d, n, stream=self.stream)
 
     def diffract_g(self, ag, a_dg, dz):
-        self.__fused_mam_callable(ag, a_dg, *self._get_prop(dz)["Pg"])
+        self._fused_mam_callable_krn(ag, a_dg, *self._get_prop(dz)["Pg"], stream=self.stream)
 
     def scatter_g(self, u, n, ug, u_dg, ng, dz):
-        self._get_prop(dz)["Qg"](u, n, ug, u_dg, ng)
+        self._get_prop(dz)["Qg"](u, n, ug, u_dg, ng, stream=self.stream)
+
+    def merge_prop(self, af, ab):
+        self._merge_prop_krn(af, ab, self.kz_gpu, stream=self.stream)
+
+    def split_prop(self, a, a_d):
+        self._split_prop_krn(a, a_d, self.kz_gpu, stream=self.stream)
+
+    def merge_grad(self, afg, abg):
+        self._merge_grad_krn(afg, abg, self.kz_gpu, stream=self.stream)
+
+    def split_grad(self, ag, a_dg):
+        raise NotImplementedError
 
 
 class BPMFuncs(Funcs):
@@ -281,13 +296,15 @@ class BPMFuncs(Funcs):
             return new_prop
 
     def diffract(self, a, dz):
-        a *= self._get_prop(dz)["P"]
+        a._elwise_multiply(self._get_prop(dz)["P"], a, stream=self.stream)
+        # a *= self._get_prop(dz)["P"]
 
     def diffract_g(self, ag, dz):
-        ag *= self._get_prop(dz)["Pg"]
+        ag._elwise_multiply(self._get_prop(dz)["Pg"], ag, stream=self.stream)
+        # ag *= self._get_prop(dz)["Pg"]
 
     def scatter(self, u, n, dz):
-        self._get_prop(dz)["Q"](u, n)
+        self._get_prop(dz)["Q"](u, n, stream=self.stream)
 
     def scatter_g(self, u, n, ug, ng, dz):
-        self._get_prop(dz)["Qg"](u, n, ug, ng)
+        self._get_prop(dz)["Qg"](u, n, ug, ng, stream=self.stream)

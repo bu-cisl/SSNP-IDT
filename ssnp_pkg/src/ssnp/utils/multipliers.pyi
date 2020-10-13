@@ -1,7 +1,8 @@
-from typing import Callable, overload, Literal, Tuple
+from typing import Callable, overload, Literal, Tuple, Optional
 from numbers import Real
 from numpy import ndarray
 from pycuda.gpuarray import GPUArray
+from pycuda.driver import Stream
 
 
 def _cache_array(func: Callable[..., Tuple[tuple, Callable[[], ndarray]]]): ...
@@ -13,8 +14,9 @@ class Multipliers:
     _xy_size: Tuple[int, int]
     _shape: Tuple[int, int]
     res: Tuple[float, float, float]
+    stream: Optional[Stream]
 
-    def __init__(self, shape: Tuple[int, int], res: Tuple[float, float, float]): ...
+    def __init__(self, shape: Tuple[int, int], res: Tuple[float, float, float], stream: Stream = None): ...
 
     @overload
     def tilt(self, c_ab, *, trunc, periodic_params=None, c_ab_out=None, gpu: Literal[True]) -> GPUArray: ...
@@ -56,4 +58,3 @@ class Multipliers:
 
     @overload
     def gaussian(self, sigma: Real, mu: Tuple[Real, Real] = (0, 0), *, gpu: Literal[False] = False) -> ndarray: ...
-

@@ -15,7 +15,7 @@ def _cache_array(func):
             try:
                 return self._gpu_cache[key]
             except KeyError:
-                arr = gpuarray.to_gpu(get_cache(self, *args, gpu=False, **kwargs))
+                arr = gpuarray.to_gpu_async(get_cache(self, *args, gpu=False, **kwargs), stream=self.stream)
                 self._gpu_cache[key] = arr
                 return arr
         try:
@@ -29,14 +29,16 @@ def _cache_array(func):
     return get_cache
 
 
+@functools.lru_cache
 class Multipliers:
-    def __init__(self, shape, res):
+    def __init__(self, shape, res, stream=None):
         assert len(shape) == 2
         self._xy_size = (shape[1], shape[0])
         self._shape = shape
         self.res = res
         self._cache = {}
         self._gpu_cache = {}
+        self.stream = stream
 
     @_cache_array
     def tilt(self, c_ab, *, trunc, periodic_params=None, c_ab_out=None):
