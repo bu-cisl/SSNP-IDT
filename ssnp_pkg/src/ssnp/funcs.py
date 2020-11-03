@@ -1,9 +1,9 @@
-from pycuda import elementwise, gpuarray, driver as cuda, reduction
+from pycuda import elementwise, gpuarray, reduction
 from pycuda.gpuarray import GPUArray
 from reikna.fft import FFT
 import numpy as np
 import reikna.cluda as cluda
-from ssnp.utils import Multipliers
+from ssnp.utils import Multipliers, get_stream_in_current
 from contextlib import contextmanager
 from functools import partial, lru_cache
 
@@ -57,8 +57,7 @@ class Funcs:
     def __init__(self, arr_like, res, n0, stream=None):
         shape = tuple(arr_like.shape)
         if stream is None:
-            ctx = cuda.Context.get_current()
-            stream = self._get_stream(ctx)
+            stream = get_stream_in_current()
         self.stream = stream
         self.reduce_mse_cr = partial(self.reduce_mse_cr_krn, stream=stream)
         self.reduce_mse_cc = partial(self.reduce_mse_cc_krn, stream=stream)
@@ -86,11 +85,6 @@ class Funcs:
         arr_like.shape = shape
         arr_like.dtype = dtype
         return FFT(arr_like).compile(thr)
-
-    @staticmethod
-    @lru_cache
-    def _get_stream(ctx):
-        return cuda.Stream()
 
     def fft(self, arr, output=None, copy=False, inverse=False):
         if output is not None:

@@ -1,4 +1,6 @@
-from pycuda import gpuarray
+from functools import lru_cache
+
+from pycuda import gpuarray, driver as cuda
 
 
 def param_check(**kwargs):
@@ -17,6 +19,19 @@ def param_check(**kwargs):
         else:
             if arr.shape != shape0:
                 raise ValueError(f"cannot match '{name}' shape {arr.shape} with '{name0}' shape {shape0}")
+
+
+@lru_cache(maxsize=None)
+def get_stream(ctx):
+    if ctx == cuda.Context.get_current():
+        return cuda.Stream()
+    else:
+        raise NotImplementedError("first time can only get stream in current context. "
+                                  f"ctx:{ctx}, current:{cuda.Context.get_current()}")
+
+
+def get_stream_in_current():
+    return get_stream(cuda.Context.get_current())
 
 
 class Config:

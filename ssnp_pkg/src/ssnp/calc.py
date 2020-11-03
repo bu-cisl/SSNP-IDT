@@ -4,7 +4,6 @@ import numpy as np
 from pycuda import gpuarray
 from ssnp.funcs import BPMFuncs, SSNPFuncs, Funcs
 from ssnp.utils import param_check, config as global_config, Multipliers
-# from warnings import warn
 
 
 def ssnp_step(u, u_d, dz, n=None, output=None, stream=None):
