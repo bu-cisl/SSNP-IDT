@@ -1,6 +1,19 @@
 ## Changelog
 
-### 0.0.1.rc4
+### Todo in current version
+
+* Add skcuda as a substitution of reikna (no need to compile FFT)
+* Compute several illumination on the same object in a batch
+* Support background refractive index (n0 > 1)
+
+### 0.0.2.alpha (developing)
+
+* Add stream parameter for async operation and related small tools
+* Add cache to avoid unnecessary recompiling
+* Fix errors:
+    * data.write: fix unexpectedly changing input data when scaling before write
+
+### 0.0.1 (Sep 7, 2020)
 
 * Add gradient calculation support (tracking operations and doing autograd)
 * Add config to set package-wise constant

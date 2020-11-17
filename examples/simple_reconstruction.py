@@ -1,6 +1,6 @@
 import numpy as np
 import os
-from time import time
+from time import perf_counter as time
 import platform
 import pycuda.compiler
 from pycuda import gpuarray
@@ -51,6 +51,3 @@ for step in range(5):
 print(time() - t)
 
 ssnp.write("ssnp_recbb.tiff", n, scale=1, pre_operator=lambda x: x)
-
-import pycuda.driver
-pycuda.driver.stop_profiler()

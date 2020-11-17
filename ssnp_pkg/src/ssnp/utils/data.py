@@ -168,7 +168,7 @@ def tiff_write(path, arr, *, scale=1, pre_operator: callable = None, dtype=np.ui
                 i = pre_operator(i)
             try:
                 if scale is not None:
-                    i *= scale * {np.uint16: 65535, np.uint8: 255}[dtype]
+                    i = i * scale * {np.uint16: 65535, np.uint8: 255}[dtype]
                 i = i.astype(np.int64)
                 np.clip(i, 0, {np.uint16: 65535, np.uint8: 255}[dtype], out=i)
             except KeyError:
@@ -183,7 +183,7 @@ def tiff_write(path, arr, *, scale=1, pre_operator: callable = None, dtype=np.ui
 def np_write(path, arr, *, scale=1., pre_operator=None, dtype=None, compress=True):
     if pre_operator is not None:
         arr = pre_operator(arr)
-    arr *= scale
+    arr = arr * scale
     if dtype is not None:
         arr = arr.astype(dtype)
     ext = os.path.splitext(path)[-1]
@@ -196,7 +196,7 @@ def np_write(path, arr, *, scale=1., pre_operator=None, dtype=None, compress=Tru
 def binary_write(path, arr, *, scale=1., pre_operator=None, dtype=None, add_hint=False):
     if pre_operator is not None:
         arr = pre_operator(arr)
-    arr *= scale
+    arr = arr * scale
     if dtype is not None:
         arr = arr.astype(dtype)
     if add_hint:
@@ -221,7 +221,7 @@ def csv_write(path: str, table):
 def mat_write(path, arr, *, scale=1., pre_operator=None, dtype=None, compress=True, key="data"):
     if pre_operator is not None:
         arr = pre_operator(arr)
-    arr *= scale
+    arr = arr * scale
     if dtype is not None:
         arr = arr.astype(dtype)
     savemat(path, {key: arr}, do_compression=compress)

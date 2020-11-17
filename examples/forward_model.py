@@ -1,6 +1,6 @@
 import numpy as np
 import os
-from time import time
+from time import perf_counter as time
 import platform
 import pycuda.compiler
 t = time()
