@@ -5,6 +5,7 @@ from ssnp.utils import Multipliers
 from ssnp.funcs import Funcs
 
 G_PRO = Union[GPUArray, property]
+ARR = Union[GPUArray, np.ndarray]
 
 class TrackStack:
     def __init__(self, u_num, shape): ...
@@ -30,7 +31,7 @@ class BeamArray:
     ops_number: dict
     _fft_funcs: Funcs
 
-    def __init__(self, u1: GPUArray, u2: GPUArray = None, relation: Literal[0, 1] = DERIVATIVE, total_ops: int = 0): ...
+    def __init__(self, u1: ARR, u2: ARR = None, relation: Literal[0, 1] = DERIVATIVE, total_ops: int = 0): ...
 
     def _parse(self, info, dz, n, track: bool): ...
 

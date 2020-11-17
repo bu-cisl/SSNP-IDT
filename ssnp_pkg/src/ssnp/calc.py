@@ -1,5 +1,3 @@
-__funcs_cache = {}
-
 import numpy as np
 from pycuda import gpuarray
 from ssnp.funcs import BPMFuncs, SSNPFuncs, Funcs
@@ -18,7 +16,11 @@ def ssnp_step(u, u_d, dz, n=None, output=None, stream=None):
     :param stream:
     :return: new (u, u_d) after a step towards +z direction
     """
-    param_check(u=u, u_d=u_d, n=n)
+    if len(u.shape) == 3:
+        param_check(u_batch=u, u_d_batch=u_d, output_batch=output)
+        param_check(u=u[0], n=n)
+    else:
+        param_check(u=u, u_d=u_d, n=n, output=output)
     funcs: SSNPFuncs = get_funcs(u, model="ssnp", stream=stream)
     a = funcs.fft(u, output=output)
     a_d = funcs.fft(u_d, output=output)
@@ -42,7 +44,11 @@ def bpm_step(u, dz, n=None, output=None, stream=None):
     :param stream:
     :return: new (u, u_d) after a step towards +z direction
     """
-    param_check(u=u, n=n, output=output)
+    if len(u.shape) == 3:
+        param_check(u_batch=u, output_batch=output)
+        param_check(u=u[0], n=n)
+    else:
+        param_check(u=u, n=n, output=output)
     funcs: BPMFuncs = get_funcs(u, model="bpm", stream=stream)
     a = funcs.fft(u, output=output)
     funcs.diffract(a, dz)
@@ -105,11 +111,11 @@ def reduce_mse_grad(u, measurement, output=None, stream=None):
     return output
 
 
-def get_multiplier(arr_like, res=None, stream=None):
+def get_multiplier(shape, res=None, stream=None):
     # funcs = get_funcs(arr_like, model="any", stream=stream)
     if res is None:
         res = global_config.res
-    return Multipliers(arr_like.shape, res, stream)
+    return Multipliers(shape, res, stream)
 
 
 def u_mul_grad_bp(ug, mul, copy=False, stream=None):
@@ -183,29 +189,13 @@ def merge_grad(ufg, ubg, copy=False, stream=None):
     return ug, u_dg
 
 
-def get_funcs(arr_like, config=None, *, model="any", stream=None):
-    global __funcs_cache
-    model = model.lower()
-    shape = tuple(arr_like.shape)
+def get_funcs(arr_like, config=None, *, model="any", stream=None, fft_type="skcuda"):
+    name = model.lower()
     if config is None:
         config = global_config
-
     res = config.res
-    # if model == "any":
-    #     try:
-    #         key = (shape, res, "ssnp", stream)
-    #         return __funcs_cache[key]
-    #     except KeyError:
-    #         return get_funcs(arr_like, config, model="bpm", stream=stream)
-
-    key = (shape, res, model, stream)
     try:
-        return __funcs_cache[key]
+        model_init = {"ssnp": SSNPFuncs, "bpm": BPMFuncs, "any": Funcs}[name]
     except KeyError:
-        try:
-            model = {"ssnp": SSNPFuncs, "bpm": BPMFuncs, "any": Funcs}[model]
-            funcs = model(arr_like, res, config.n0, stream)
-        except KeyError:
-            raise ValueError(f"unknown model {model}") from None
-    __funcs_cache[key] = funcs
-    return funcs
+        raise ValueError(f"unknown model {model}") from None
+    return model_init(arr_like, res, config.n0, stream, fft_type)

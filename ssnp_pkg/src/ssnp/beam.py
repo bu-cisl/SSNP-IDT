@@ -23,21 +23,20 @@ class BeamArray:
     DERIVATIVE = 0
     BACKWARD = 1
 
-    def __init__(self, u1, u2=None, relation=BACKWARD, total_ops=0):
+    def __init__(self, u1, u2=None, relation=BACKWARD, total_ops=0, stream=None):
         def to_gpu(u, name):
-            if isinstance(u, GPUArray):
-                if u.dtype != self.dtype:
-                    raise ValueError(f"GPUArray {name} must be {self.dtype} but not {u.dtype}")
-                return u.copy()
-            elif isinstance(u, np.ndarray):
+            # if isinstance(u, GPUArray):
+            #     if u.dtype != self.dtype:
+            #         raise ValueError(f"GPUArray {name} must be {self.dtype} but not {u.dtype}")
+            # elif isinstance(u, np.ndarray):
+            if isinstance(u, (np.ndarray, GPUArray)):
                 if u.dtype != self.dtype:
                     warn(f"force casting {name} to {self.dtype}", stacklevel=3)
-                u = u.astype(self.dtype)
-                return gpuarray.to_gpu(u)
+                    u = u.astype(self.dtype)
             else:
-                u = np.array(u, dtype=np.complex128)
+                u = np.array(u, dtype=self.dtype)
                 warn(f"converting {name} to numpy array as fallback", stacklevel=3)
-                to_gpu(u, name)
+            return gpuarray.to_gpu_async(u, stream=stream)  # async version of copy()
 
         self._u1 = to_gpu(u1, "u1")
         if u2 is not None:
@@ -51,12 +50,13 @@ class BeamArray:
             self._u2 = None
         self._tape = []
         self._array_pool = []
-        self.multiplier = calc.get_multiplier(self._u1)
+        shape = self._u1.shape[-2:]
+        self.multiplier = calc.get_multiplier(shape, stream=stream)
         self._get_array_times = 0
 
         max_ops = int(np.sqrt(2 * total_ops)) + 1 if total_ops > 0 else 0
         self.ops_number = {"max": max_ops, "remainder": max_ops, "current": max_ops}
-        self._fft_funcs = calc.get_funcs(self._u1)
+        self._fft_funcs = calc.get_funcs(self._u1, stream=stream)
 
     def _get_array(self):
         if len(self._array_pool) == 0:
@@ -169,7 +169,7 @@ class BeamArray:
         self.merge_prop()
         self._parse(('ssnp', self._u1, self._u2), dz, n, track)
 
-    def bpm(self, dz, n=None, *, track=False):
+    def bpm(self, dz, n=None, *, track=False):  # todo: untested
         """
         Perform a BPM operation for this beam array
 
@@ -182,7 +182,7 @@ class BeamArray:
             self.backward = None
         self._parse(('bpm', self._u1), dz, n, track)
 
-    def n_grad(self, output=None):
+    def n_grad(self, output=None):  # todo: correct output shape
         # output shape checking/setting
         scatter_num = 0
         ug = None
@@ -303,7 +303,7 @@ class BeamArray:
             if track:
                 self._tape.append(("u*", arr))
 
-    def a_mul(self, arr, hold=None, track=False):
+    def a_mul(self, arr, hold=None, track=False):  # todo 3D broadcasting
         fourier = self._fft_funcs.fourier
         param_check(field=self._u1, arr=arr, hold=None if hold is None else hold._u1)
         if hold is not None:
@@ -319,14 +319,14 @@ class BeamArray:
             if track:
                 self._tape.append(("a*", arr))
 
-    def __imul__(self, other):
+    def __imul__(self, other):  # todo async
         self._u1 *= other
         if self._u2 is not None:
             self._u2 *= other
         return self
 
     @staticmethod
-    def _iadd_isub(self, other, add):
+    def _iadd_isub(self, other, add):  # todo async
         assert isinstance(other, BeamArray)
         param_check(self=self._u1, add=other._u1)
         if self._u2 is None:

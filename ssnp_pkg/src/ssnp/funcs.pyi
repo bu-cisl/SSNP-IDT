@@ -1,3 +1,5 @@
+from typing import Literal
+
 import numpy as np
 from pycuda.gpuarray import GPUArray
 from pycuda.elementwise import ElementwiseKernel
@@ -9,6 +11,7 @@ from .utils import Multipliers
 
 class Funcs:
     shape: tuple
+    batch: int
     res: tuple
     n0: float
     stream: Stream
@@ -24,15 +27,18 @@ class Funcs:
     mse_cr_grad_krn: ElementwiseKernel
     mse_cc_grad_krn: ElementwiseKernel
     mul_grad_bp_krn: ElementwiseKernel
+    _fft_reikna: callable
+    _fft_sk: callable
 
-    def __init__(self, arr_like: GPUArray, res, n0, stream: Stream = None): ...
+    def __init__(self, arr_like: GPUArray, res, n0, stream: Stream = None,
+                 fft_type: Literal["reikna", "skcuda"] = "reikna"): ...
 
     @staticmethod
     def _compile_fft(shape, dtype, stream): ...
 
-    def fft(self, arr: GPUArray, output: GPUArray = None, copy: bool = False, inverse=False): ...
+    def fft(self, arr: GPUArray, output: GPUArray = None, copy: bool = False, inverse=False) -> GPUArray: ...
 
-    def ifft(self, arr: GPUArray, output: GPUArray = None, copy: bool = False): ...
+    def ifft(self, arr: GPUArray, output: GPUArray = None, copy: bool = False) -> GPUArray: ...
 
     def fourier(self, arr: GPUArray, copy: bool = False): ...
 

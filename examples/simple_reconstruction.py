@@ -17,6 +17,7 @@ ssnp.config.res = (0.1, 0.1, 0.1)
 n = ssnp.read("bb.tiff", dtype=np.double)
 n *= 0.
 ng = gpuarray.empty_like(n)
+ng_total = gpuarray.empty_like(n)
 
 NA = 0.65
 
@@ -36,6 +37,7 @@ mea *= 2
 t = time()
 for step in range(5):
     print(f"Step: {step}")
+    ng_total *= 0
     for num in range(8):
         beam.forward = u_list[num]
         beam.backward = 0
@@ -46,8 +48,10 @@ for step in range(5):
         print(f"dir {num}, loss = {loss}")
         beam.n_grad(ng)
         ng *= 0.005
-        n -= ng
-        n = gpuarray.maximum(n, 0, out=n)
+        ng_total += ng
+
+    n -= ng_total
+    n = gpuarray.maximum(n, 0, out=n)
 print(time() - t)
 
-ssnp.write("ssnp_recbb.tiff", n, scale=1, pre_operator=lambda x: x)
+ssnp.write("ssnp_recbb.tiff", n)

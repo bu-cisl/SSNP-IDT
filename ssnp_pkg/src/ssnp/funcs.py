@@ -1,18 +1,18 @@
 from pycuda import elementwise, gpuarray, reduction
 from pycuda.gpuarray import GPUArray
-from reikna.fft import FFT
 import numpy as np
-import reikna.cluda as cluda
 from ssnp.utils import Multipliers, get_stream_in_current
 from contextlib import contextmanager
 from functools import partial, lru_cache
+from skcuda import fft as skfft
 
 
 class Funcs:
     # __temp_memory_pool = {}
+    _funcs_cache = {}
     reduce_mse_cr_krn = None
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, arr_like, res, n0, stream=None, fft_type="reikna"):
         if cls.reduce_mse_cr_krn is None:
             Funcs.reduce_mse_cr_krn = reduction.ReductionKernel(
                 dtype_out=np.double, neutral=0,
@@ -52,10 +52,19 @@ class Funcs:
                 """,
                 preamble='#include "cuComplex.h"'
             )
-        return super().__new__(cls)
-
-    def __init__(self, arr_like, res, n0, stream=None):
         shape = tuple(arr_like.shape)
+        key = (shape, res, stream, fft_type)
+        try:
+            return cls._funcs_cache[key]
+        except KeyError:
+            cls._funcs_cache[key] = super().__new__(cls)
+            return cls._funcs_cache[key]
+
+    def __init__(self, arr_like, res, n0, stream=None, fft_type="reikna"):
+        if self._funcs_cache is None:
+            return
+        self._funcs_cache = None  # only for mark as initialized
+
         if stream is None:
             stream = get_stream_in_current()
         self.stream = stream
@@ -64,29 +73,53 @@ class Funcs:
         self.mse_cc_grad = partial(self.mse_cc_grad_krn, stream=stream)
         self.mse_cr_grad = partial(self.mse_cr_grad_krn, stream=stream)
         self.mul_grad_bp = partial(self.mul_grad_bp_krn, stream=stream)
-        self._fft_callable = self._compile_fft(arr_like.shape, arr_like.dtype, stream)
+        shape = tuple(arr_like.shape)
+        if fft_type == "reikna":
+            if len(shape) != 2:
+                raise NotImplementedError(f"cannot process {len(shape)}-D data with reikna")
+            self._fft_callable = self._compile_fft(arr_like.shape, arr_like.dtype, stream)
+            self.fft = self._fft_reikna
+            batch = 1
+        elif fft_type == "skcuda":
+            if len(shape) == 3:
+                batch = shape[0]
+                shape = shape[1:]
+            else:
+                batch = 1
+            if len(shape) != 2:
+                raise NotImplementedError(f"cannot process {len(shape)}-D data with skcuda")
+            self._skfft_plan = skfft.Plan(shape, np.complex128, np.complex128, batch, stream)
+            self.fft = self._fft_sk
+        else:
+            raise ValueError(f"Unknown FFT type {fft_type}")
         self.shape = shape
+        self.batch = batch
         self._prop_cache = {}
         self._pupil_cache = {}
         self.res = res
         self.n0 = n0
         self.multiplier = Multipliers(shape, res, stream)
         c_gamma = self.multiplier.c_gamma()
+        c_gamma = np.broadcast_to(c_gamma, arr_like.shape)
         kz = c_gamma * (2 * np.pi * res[2] * n0)
         self.kz = kz.astype(np.double)
         self.kz_gpu = gpuarray.to_gpu(kz)
         self.eva = np.exp(np.minimum((c_gamma - 0.2) * 5, 0))
+        # self.fft = {"reikna": self._fft_reikna, "skcuda": self._fft_sk}[fft_type]
+        self.ifft = partial(self.fft, inverse=True)
 
     @staticmethod
     @lru_cache
     def _compile_fft(shape, dtype, stream):
+        from reikna.fft import FFT
+        import reikna.cluda as cluda
         thr = cluda.cuda_api().Thread(stream)
         arr_like = type("", (), {})()
         arr_like.shape = shape
         arr_like.dtype = dtype
         return FFT(arr_like).compile(thr)
 
-    def fft(self, arr, output=None, copy=False, inverse=False):
+    def _fft_reikna(self, arr, output=None, copy=False, inverse=False):
         if output is not None:
             o = output
         elif copy:
@@ -96,8 +129,19 @@ class Funcs:
         self._fft_callable(o, arr, inverse=inverse)
         return o
 
-    def ifft(self, *args, **kwargs):
-        return self.fft(*args, **kwargs, inverse=True)
+    def _fft_sk(self, arr, *, output=None, copy=False, inverse=False):
+        if output is not None:
+            o = output
+        elif copy:
+            o = gpuarray.empty_like(arr)
+        else:
+            o = arr
+        fft = skfft.ifft if inverse else skfft.fft
+        fft(arr, o, self._skfft_plan)
+        if inverse:
+            scale = 1 / self.shape[-1] / self.shape[-2]
+            o._axpbz(scale, 0, o, stream=self.stream)
+        return o
 
     @contextmanager
     def fourier(self, arr, copy=False):
@@ -146,6 +190,7 @@ class Funcs:
 
 
 class SSNPFuncs(Funcs):
+    _funcs_cache = {}
     _fused_mam_callable_krn = elementwise.ElementwiseKernel(
         "double2 *a, double2 *b, "
         "double2 *p00, double2 *p01, double2 *p10, double2 *p11",
@@ -214,7 +259,8 @@ class SSNPFuncs(Funcs):
             q_op = elementwise.ElementwiseKernel(
                 "double2 *u, double2 *ud, double *n_",
                 f"""
-                    temp = {phase_factor} * n_[i] * ({2 * n0} + n_[i]);
+                    temp = n_[i % (n / {self.batch})];
+                    temp = {phase_factor} * temp * ({2 * n0} + temp);
                     ud[i].x -= temp * u[i].x;
                     ud[i].y -= temp * u[i].y;
                 """,
@@ -226,17 +272,17 @@ class SSNPFuncs(Funcs):
                 # Forward: ud = ud - temp * u
                 # ng = Re{-udg * conj(u) * (d_temp(n) / d_n)}
                 f"""
-                    temp = {phase_factor} * n_[i] * ({2 * n0} + n_[i]);
+                    ni = n_[i % (n / {self.batch})];
+                    temp = {phase_factor} * ni * ({2 * n0} + ni);
                     ug[i].x -= temp * udg[i].x;
                     ug[i].y -= temp * udg[i].y;
-                    n_g[i] = -(udg[i].x * u[i].x + udg[i].y * u[i].y) * {phase_factor} * ({2 * n0} + 2 * n_[i])
+                    n_g[i] = -(udg[i].x * u[i].x + udg[i].y * u[i].y) * {phase_factor} * ({2 * n0} + 2 * ni)
                 """,
-                loop_prep="double temp",
+                loop_prep="double temp, ni",
                 preamble='#include "cuComplex.h"',
                 name="ssnp_qg"
             )
-            new_prop = {"P": p_mat, "Pg": [p_mat[0].conj(), p_mat[2].conj(), p_mat[1].conj(), p_mat[3].conj()],
-                        "Q": q_op, "Qg": q_op_g}
+            new_prop = {"P": p_mat, "Pg": [p_mat[i].conj() for i in (0, 2, 1, 3)], "Q": q_op, "Qg": q_op_g}
             self._prop_cache[key] = new_prop
             return new_prop
 
@@ -266,6 +312,8 @@ class SSNPFuncs(Funcs):
 
 
 class BPMFuncs(Funcs):
+    _funcs_cache = {}
+
     def _get_prop(self, dz):
         res = self.res
         n0 = self.n0
@@ -281,7 +329,8 @@ class BPMFuncs(Funcs):
             q_op = elementwise.ElementwiseKernel(
                 "double2 *u, double *n_",
                 f"""
-                    temp = make_cuDoubleComplex(cos(n_[i] * {phase_factor}), sin(n_[i] * {phase_factor}));
+                    temp = n_[i % (n / {self.batch})];
+                    temp = make_cuDoubleComplex(cos(temp * {phase_factor}), sin(temp * {phase_factor}));
                     u[i] = cuCmul(u[i], temp);
                 """,
                 loop_prep="double2 temp",
@@ -291,7 +340,8 @@ class BPMFuncs(Funcs):
                 "double2 *u, double *n_, double2 *ug, double *n_g",
                 # Forward: u=u*temp
                 f"""
-                    temp_conj = make_cuDoubleComplex(cos(n_[i] * {phase_factor}), -sin(n_[i] * {phase_factor}));
+                    temp = n_[i % (n / {self.batch})];
+                    temp_conj = make_cuDoubleComplex(cos(temp * {phase_factor}), -sin(temp * {phase_factor}));
                     n_g[i] = {phase_factor} * 
                         (cuCimag(ug[i]) * cuCreal(u[i]) - cuCimag(u[i]) * cuCreal(ug[i]));
                     ug[i] = cuCmul(ug[i], temp_conj);

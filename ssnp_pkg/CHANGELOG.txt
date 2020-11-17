@@ -1,6 +1,6 @@
 ## Changelog
 
-### Todo in current version
+### To do list in current version
 
 * Add skcuda as a substitution of reikna (no need to compile FFT)
 * Compute several illumination on the same object in a batch
