@@ -25,10 +25,6 @@ class BeamArray:
 
     def __init__(self, u1, u2=None, relation=BACKWARD, total_ops=0, stream=None):
         def to_gpu(u, name):
-            # if isinstance(u, GPUArray):
-            #     if u.dtype != self.dtype:
-            #         raise ValueError(f"GPUArray {name} must be {self.dtype} but not {u.dtype}")
-            # elif isinstance(u, np.ndarray):
             if isinstance(u, (np.ndarray, GPUArray)):
                 if u.dtype != self.dtype:
                     warn(f"force casting {name} to {self.dtype}", stacklevel=3)
@@ -196,12 +192,13 @@ class BeamArray:
         scatter_num = 0
         ug = None
         u_dg = None
+        ng_batch = gpuarray.empty_like(self._u1, dtype=np.float64)
         for op in self._tape:
             if op[0] in {'ssnp', 'bpm'} and op[-1] is not None:
                 scatter_num += 1
         if output is None:
             # new is scatter_num times of empty_like with double dtype
-            output = GPUArray((scatter_num, *self._u1.shape), np.double)
+            output = GPUArray((scatter_num, *self._u1.shape[-2:]), np.double)
         elif len(output) != scatter_num:
             raise ValueError(f"output length {len(output)} is different from scatter operation number {scatter_num}")
 
@@ -247,7 +244,11 @@ class BeamArray:
                         u = index_u
                     # u, ug, dz, n is all checked and not None
                     scatter_num -= 1
-                    calc.bpm_grad_bp(u, ug, dz, n, output[scatter_num])
+                    if self.batch > 1:
+                        calc.bpm_grad_bp(u, ug, dz, n, ng_batch)
+                        calc.sum_batch(ng_batch, output[scatter_num])
+                    else:
+                        calc.bpm_grad_bp(u, ug, dz, n, output[scatter_num])
                     self.recycle_array(u)
 
             elif op[0] == "ssnp":
@@ -263,7 +264,11 @@ class BeamArray:
                     calc.ssnp_grad_bp(u, ug, u_dg, dz)
                 else:
                     scatter_num -= 1
-                    calc.ssnp_grad_bp(u, ug, u_dg, dz, n, output[scatter_num])
+                    if self.batch > 1:
+                        calc.ssnp_grad_bp(u, ug, u_dg, dz, n, ng_batch)
+                        calc.sum_batch(ng_batch, output[scatter_num])
+                    else:
+                        calc.ssnp_grad_bp(u, ug, u_dg, dz, n, output[scatter_num])
                     self.recycle_array(u)
 
             elif op[0] == "u*":

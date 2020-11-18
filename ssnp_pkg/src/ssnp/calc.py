@@ -59,7 +59,8 @@ def bpm_step(u, dz, n=None, output=None, stream=None):
 
 
 def bpm_grad_bp(u, ug, dz, n=None, ng=None, stream=None):
-    param_check(u_1=u, u_grad=ug, n=n, n_grad=ng)
+    param_check(u_1=u, u_grad=ug, n_grad=ng)
+    param_check(u_1=u[0] if len(u.shape) == 3 else u, n=n)
     funcs: BPMFuncs = get_funcs(ug, model="bpm", stream=stream)
     if n is not None:
         funcs.scatter_g(u, n, ug, ng, dz)
@@ -69,7 +70,8 @@ def bpm_grad_bp(u, ug, dz, n=None, ng=None, stream=None):
 
 
 def ssnp_grad_bp(u, ug, u_dg, dz, n=None, ng=None, stream=None):
-    param_check(u_1=u, u_grad=ug, u_d_grad=u_dg, n=n, n_grad=ng)
+    param_check(u_1=u, u_grad=ug, u_d_grad=u_dg, n_grad=ng)
+    param_check(u_1=u[0] if len(u.shape) == 3 else u, n=n)
     funcs: SSNPFuncs = get_funcs(ug, model="ssnp", stream=stream)
     if n is not None:
         funcs.scatter_g(u, n, ug, u_dg, ng, dz)
@@ -103,7 +105,7 @@ def reduce_mse_grad(u, measurement, output=None, stream=None):
     funcs = get_funcs(u, model="any", stream=stream)
     if output is None:
         output = gpuarray.empty_like(u)
-    funcs.reduce_mse(u, measurement)
+    funcs.mse_grad(u, measurement, output)
     # if measurement.dtype == np.complex128:
     #     funcs.mse_cc_grad(u, measurement, output)
     # elif measurement.dtype == np.double:
