@@ -45,13 +45,7 @@ class Funcs:
                 loop_prep="double temp",
                 preamble='#include "cuComplex.h"'
             )
-            Funcs.mul_grad_bp_krn = elementwise.ElementwiseKernel(
-                "double2 *ug, double2 *mul",
-                """
-                ug[i] = cuCmul(ug[i], cuConj(mul[i]))
-                """,
-                preamble='#include "cuComplex.h"'
-            )
+
         shape = tuple(arr_like.shape)
         key = (shape, res, stream, fft_type)
         try:
@@ -68,11 +62,8 @@ class Funcs:
         if stream is None:
             stream = get_stream_in_current()
         self.stream = stream
-        self.reduce_mse_cr = partial(self.reduce_mse_cr_krn, stream=stream)
-        self.reduce_mse_cc = partial(self.reduce_mse_cc_krn, stream=stream)
-        self.mse_cc_grad = partial(self.mse_cc_grad_krn, stream=stream)
-        self.mse_cr_grad = partial(self.mse_cr_grad_krn, stream=stream)
-        self.mul_grad_bp = partial(self.mul_grad_bp_krn, stream=stream)
+
+        # FFTs
         shape = tuple(arr_like.shape)
         if fft_type == "reikna":
             if len(shape) != 2:
@@ -92,8 +83,11 @@ class Funcs:
             self.fft = self._fft_sk
         else:
             raise ValueError(f"Unknown FFT type {fft_type}")
+        self.ifft = partial(self.fft, inverse=True)
         self.shape = shape
         self.batch = batch
+
+        # multipliers
         self._prop_cache = {}
         self._pupil_cache = {}
         self.res = res
@@ -105,8 +99,72 @@ class Funcs:
         self.kz = kz.astype(np.double)
         self.kz_gpu = gpuarray.to_gpu(kz)
         self.eva = np.exp(np.minimum((c_gamma - 0.2) * 5, 0))
-        # self.fft = {"reikna": self._fft_reikna, "skcuda": self._fft_sk}[fft_type]
-        self.ifft = partial(self.fft, inverse=True)
+
+        # function interface
+        self.mul_conj_krn = elementwise.ElementwiseKernel(
+            "double2 *ug, double2 *mul",
+            f"""
+            ug[i] = cuCmul(ug[i], cuConj(mul[i % (n / {self.batch})]));
+            """,
+            preamble='#include "cuComplex.h"'
+        )
+        self.mul_krn = elementwise.ElementwiseKernel(
+            "double2 *u, double2 *mul",
+            f"""
+            u[i] = cuCmul(u[i], mul[i % (n / {self.batch})]);
+            """,
+            preamble='#include "cuComplex.h"'
+        )
+        self.sum_cmplx_batch_krn = elementwise.ElementwiseKernel(
+            "double2 *out, double2 *u",
+            f"""
+            out[i] = u[i];
+            for (j = 1; j < {self.batch}; j++) {{
+                out[i].x += u[i + j * n].x;
+                out[i].y += u[i + j * n].y;
+            }}
+            """,
+            loop_prep="unsigned j",
+        )
+        self.sum_double_batch_krn = elementwise.ElementwiseKernel(
+            "double *out, double *u",
+            f"""
+            out[i] = u[i];
+            for (j = 1; j < {self.batch}; j++)
+                out[i] += u[i + j * n];
+            """,
+            loop_prep="unsigned j",
+        )
+        # self.reduce_mse_cr = partial(self.reduce_mse_cr_krn, stream=stream)
+        # self.reduce_mse_cc = partial(self.reduce_mse_cc_krn, stream=stream)
+        # self.mse_cc_grad = partial(self.mse_cc_grad_krn, stream=stream)
+        # self.mse_cr_grad = partial(self.mse_cr_grad_krn, stream=stream)
+        self.mul = partial(self.mul_krn, stream=stream)
+        self.mul_conj = partial(self.mul_conj_krn, stream=stream)
+
+    def reduce_mse(self, field, measurement):
+        if field.dtype == np.complex128:
+            if measurement.dtype == np.float64:
+                return Funcs.reduce_mse_cr_krn(field, measurement, stream=self.stream)
+            elif measurement.dtype == np.complex128:
+                return Funcs.reduce_mse_cc_krn(field, measurement, stream=self.stream)
+        raise TypeError(f"incompatible dtype: field {field.dtype}, measurement {measurement.dtype}")
+
+    def mse_grad(self, field, measurement, gradient):
+        if field.dtype == np.complex128 and gradient.dtype == np.complex128:
+            if measurement.dtype == np.float64:
+                return Funcs.mse_cr_grad_krn(field, measurement, gradient, stream=self.stream)
+            elif measurement.dtype == np.complex128:
+                return Funcs.mse_cc_grad_krn(field, measurement, gradient, stream=self.stream)
+        raise TypeError(f"incompatible dtype: field {field.dtype}, measurement {measurement.dtype}, "
+                        f"gradient {gradient.dtype}")
+
+    def sum_batch(self, batch, sum_):
+        if batch.dtype == np.complex128 and sum_.dtype == np.complex128:
+            return self.sum_cmplx_batch_krn(sum_, batch, stream=self.stream)
+        elif batch.dtype == np.float64 and sum_.dtype == np.float64:
+            return self.sum_double_batch_krn(sum_, batch, stream=self.stream)
+        raise TypeError(f"incompatible dtype: field {batch.dtype}, measurement {sum_.dtype}")
 
     @staticmethod
     @lru_cache
@@ -152,6 +210,12 @@ class Funcs:
         raise NotImplementedError
 
     def scatter(self, *args):
+        raise NotImplementedError
+
+    def diffract_g(self, ag, dz):
+        raise NotImplementedError
+
+    def scatter_g(self, u, n, ug, ng, dz):
         raise NotImplementedError
 
     def _get_prop(self, dz):

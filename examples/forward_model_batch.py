@@ -18,7 +18,7 @@ n = ssnp.read("bb.tiff", np.double)
 n *= 0.01
 NA = 0.65
 u = ssnp.read("plane", np.complex128, shape=n.shape[1:], gpu=False)
-u = np.broadcast_to(u, (8, *u.shape))
+u = np.broadcast_to(u, (8, *u.shape)).copy()
 beam = ssnp.BeamArray(u)
 
 for num in range(8):
@@ -30,10 +30,7 @@ beam.backward = 0
 beam.ssnp(1, n)
 beam.ssnp(-len(n) / 2)
 beam.backward = None
-fourier = ssnp.calc.get_funcs(beam.forward).fourier
-with fourier(beam.forward) as f_beam:  # todo fix a_mul
-    for fi in f_beam:
-        fi *= beam.multiplier.binary_pupil(1.0001 * NA, gpu=True)
+beam.binary_pupil(1.0001 * NA)
 
 measurements = beam.forward.get()
 print(time() - t)

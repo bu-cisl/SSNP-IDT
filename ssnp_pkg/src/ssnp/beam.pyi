@@ -1,4 +1,5 @@
 from pycuda.gpuarray import GPUArray
+from pycuda.driver import Stream
 from typing import Literal, Optional, List, Union
 import numpy as np
 from ssnp.utils import Multipliers
@@ -30,6 +31,8 @@ class BeamArray:
     _tape: list
     ops_number: dict
     _fft_funcs: Funcs
+    batch: int
+    stream: Stream
 
     def __init__(self, u1: ARR, u2: ARR = None, relation: Literal[0, 1] = DERIVATIVE, total_ops: int = 0): ...
 

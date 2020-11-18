@@ -39,13 +39,21 @@ class BeamArray:
             return gpuarray.to_gpu_async(u, stream=stream)  # async version of copy()
 
         self._u1 = to_gpu(u1, "u1")
+        shape = self._u1.shape
+        if len(shape) == 2:
+            self.batch = 1
+        elif len(shape) == 3:
+            self.batch = shape[0]
+        else:
+            raise ValueError(f"cannot process {len(shape)}-D data with shape {shape}")
+
         if u2 is not None:
-            if u1.shape != u2.shape:
-                raise ValueError(f"u1 shape {u1.shape} cannot match u2 shape {u2.shape}")
+            self._u2 = to_gpu(u2, "u2")
+            if self._u2.shape != shape:
+                raise ValueError(f"u1 shape {shape} cannot match u2 shape {self._u2.shape}")
             if relation not in {BeamArray.DERIVATIVE, BeamArray.BACKWARD}:
                 raise ValueError("unknown relation type")
             self.relation = relation
-            self._u2 = to_gpu(u2, "u2")
         else:
             self._u2 = None
         self._tape = []
@@ -57,6 +65,7 @@ class BeamArray:
         max_ops = int(np.sqrt(2 * total_ops)) + 1 if total_ops > 0 else 0
         self.ops_number = {"max": max_ops, "remainder": max_ops, "current": max_ops}
         self._fft_funcs = calc.get_funcs(self._u1, stream=stream)
+        self.stream = stream
 
     def _get_array(self):
         if len(self._array_pool) == 0:
@@ -73,12 +82,12 @@ class BeamArray:
 
     def split_prop(self):
         if self.relation == BeamArray.DERIVATIVE:
-            calc.split_prop(self._u1, self._u2)
+            calc.split_prop(self._u1, self._u2, stream=self.stream)
             self.relation = BeamArray.BACKWARD
 
     def merge_prop(self):
         if self.relation == BeamArray.BACKWARD:
-            calc.merge_prop(self._u1, self._u2)
+            calc.merge_prop(self._u1, self._u2, stream=self.stream)
             self.relation = BeamArray.DERIVATIVE
 
     @property
@@ -259,17 +268,17 @@ class BeamArray:
 
             elif op[0] == "u*":
                 _, mul = op
-                calc.u_mul_grad_bp(ug, mul)
+                calc.u_mul_conj(ug, mul)
                 if u_dg is not None:
-                    calc.u_mul_grad_bp(u_dg, mul)
+                    calc.u_mul_conj(u_dg, mul)
 
             elif op[0] == "a*":
                 _, mul = op
                 with self._fft_funcs.fourier(ug):
-                    calc.u_mul_grad_bp(ug, mul)
+                    calc.u_mul_conj(ug, mul)
                 if u_dg is not None:
                     with self._fft_funcs.fourier(u_dg):
-                        calc.u_mul_grad_bp(u_dg, mul)
+                        calc.u_mul_conj(u_dg, mul)
             else:
                 raise NotImplementedError(f"unknown operation {op[0]}")
         assert scatter_num == 0
@@ -293,7 +302,7 @@ class BeamArray:
         :param hold: some part not perform multiply
         :param track: track this operation for gradient calculation
         """
-        param_check(field=self._u1, arr=arr, hold=None if hold is None else hold._u1)
+        param_check(field=self._u1, multiplier=arr, hold=None if hold is None else hold._u1)
         if hold is not None:
             self.__isub__(hold)
             self.mul(arr, track=track)
@@ -301,28 +310,51 @@ class BeamArray:
         else:
             self.__imul__(arr)
             if track:
+                assert len(arr.shape) == 2
                 self._tape.append(("u*", arr))
 
-    def a_mul(self, arr, hold=None, track=False):  # todo 3D broadcasting
+    def a_mul(self, arr, hold=None, track=False):
         fourier = self._fft_funcs.fourier
-        param_check(field=self._u1, arr=arr, hold=None if hold is None else hold._u1)
+        if self.batch == 1:
+            param_check(angular_spectrum=self._u1, multiplier=arr, hold=None if hold is None else hold._u1)
+        else:
+            param_check(angular_spectrum=self._u1[0], multiplier=arr)
         if hold is not None:
             self.__isub__(hold)
             self.a_mul(arr, track=track)
             self.__iadd__(hold)
         else:
             with fourier(self._u1):
-                self._u1 *= arr
+                calc.u_mul(self._u1, arr)
             if self._u2 is not None:
                 with fourier(self._u2):
-                    self._u2 *= arr
+                    calc.u_mul(self._u2, arr)
             if track:
                 self._tape.append(("a*", arr))
 
-    def __imul__(self, other):  # todo async
-        self._u1 *= other
-        if self._u2 is not None:
-            self._u2 *= other
+    def __imul__(self, other):  # todo: move to calc
+        if isinstance(other, GPUArray):
+            if len(other.shape) >= 3:  # if so, other must be full shape, or error
+                param_check(self=self._u1, other=other)
+                self._u1._elwise_multiply(other, self, stream=self.stream)
+                if self._u2 is not None:
+                    self._u2._elwise_multiply(other, self, stream=self.stream)
+                return self
+
+            # use batch compatible multiply
+            elif self.batch > 1:  # otherwise, if 3D broadcasting needed
+                param_check(self=self._u1[0], other=other)
+            else:  # normal 2D * 2D
+                param_check(self=self._u1, other=other)
+            calc.u_mul(self._u1, other, stream=self.stream)
+            if self._u2 is not None:
+                calc.u_mul(self._u2, other, stream=self.stream)
+
+        else:
+            # use number multiply
+            self._u1._axpbz(other, 0, self, stream=self.stream)
+            if self._u2 is not None:
+                self._u2._axpbz(other, 0, self, stream=self.stream)
         return self
 
     @staticmethod

@@ -1,6 +1,6 @@
 from typing import Tuple, Literal, Union
 from pycuda.driver import Stream
-from .funcs import BPMFuncs, SSNPFuncs, Funcs
+from ssnp.funcs import BPMFuncs, SSNPFuncs, Funcs
 from pycuda.gpuarray import GPUArray
 import numpy as np
 from numbers import Real
@@ -34,11 +34,16 @@ def reduce_mse_grad(u: GPUArray, measurement: GPUArray, output: GPUArray = None,
 
 # def binary_pupil(u: GPUArray, na: float, multiplier: Multipliers = None) -> GPUArray: ...
 
+def sum_batch(u: GPUArray, output: GPUArray): ...
+
 
 def get_multiplier(shape, res=None, stream: Stream = None): ...
 
 
-def u_mul_grad_bp(ug: GPUArray, mul, copy: bool = False, stream: Stream = None): ...
+def u_mul(u: GPUArray, mul, copy: bool = False, stream: Stream = None): ...
+
+
+def u_mul_conj(ug: GPUArray, mul, copy: bool = False, stream: Stream = None): ...
 
 
 def merge_prop(uf: GPUArray, ub: GPUArray, copy: bool = False, stream: Stream = None) -> Tuple[GPUArray, GPUArray]: ...

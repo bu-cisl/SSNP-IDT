@@ -83,12 +83,13 @@ def reduce_mse(u, measurement, stream=None):
     if u.dtype != np.complex128:
         raise ValueError(f"u dtype {u.dtype} is incompatible")
     funcs = get_funcs(u, model="any", stream=stream)
-    if measurement.dtype == np.complex128:
-        result = funcs.reduce_mse_cc(u, measurement)
-    elif measurement.dtype == np.double:
-        result = funcs.reduce_mse_cr(u, measurement)
-    else:
-        raise ValueError(f"measurement dtype {measurement.dtype} is incompatible")
+    # if measurement.dtype == np.complex128:
+    #     result = funcs.reduce_mse_cc(u, measurement)
+    # elif measurement.dtype == np.double:
+    #     result = funcs.reduce_mse_cr(u, measurement)
+    # else:
+    #     raise ValueError(f"measurement dtype {measurement.dtype} is incompatible")
+    result = funcs.reduce_mse(u, measurement)
     if stream is None:
         return result.get()
     else:
@@ -102,13 +103,23 @@ def reduce_mse_grad(u, measurement, output=None, stream=None):
     funcs = get_funcs(u, model="any", stream=stream)
     if output is None:
         output = gpuarray.empty_like(u)
-    if measurement.dtype == np.complex128:
-        funcs.mse_cc_grad(u, measurement, output)
-    elif measurement.dtype == np.double:
-        funcs.mse_cr_grad(u, measurement, output)
-    else:
-        raise ValueError(f"measurement dtype {measurement.dtype} is incompatible")
+    funcs.reduce_mse(u, measurement)
+    # if measurement.dtype == np.complex128:
+    #     funcs.mse_cc_grad(u, measurement, output)
+    # elif measurement.dtype == np.double:
+    #     funcs.mse_cr_grad(u, measurement, output)
+    # else:
+    #     raise ValueError(f"measurement dtype {measurement.dtype} is incompatible")
     return output
+
+
+def sum_batch(u, output=None, stream=None):
+    param_check(u=u[0], output=output)
+    funcs = get_funcs(u, model="any", stream=stream)
+    if output is None:
+        funcs.sum_batch(u, u[0])
+    else:
+        funcs.sum_batch(u, output)
 
 
 def get_multiplier(shape, res=None, stream=None):
@@ -118,42 +129,24 @@ def get_multiplier(shape, res=None, stream=None):
     return Multipliers(shape, res, stream)
 
 
-def u_mul_grad_bp(ug, mul, copy=False, stream=None):
+def u_mul_conj(ug, mul, copy=False, stream=None):
     funcs = get_funcs(ug, model="any", stream=stream)
     if copy:
         out = gpuarray.to_gpu_async(ug, stream=stream)
     else:
         out = ug
-    funcs.mul_grad_bp(out, mul)
+    funcs.mul_conj(out, mul)
     return out
 
 
-# def pure_forward_d(u, output=None):
-#     """
-#     Calculate z partial derivative for a initial x-y complex amplitude in free
-#     (or homogeneous) space due to pure forward propagation.
-#
-#     :param u: x-y complex amplitude
-#     :param output: (optional) output memory, must have same shape and dtype
-#     :return: z partial derivative of u
-#     """
-#     warn("pure_forward_d(u) is deprecated, use merge_prop(u, zero) instead",
-#          DeprecationWarning, stacklevel=2)
-#     funcs = get_funcs(u, model="ssnp")
-#     af = funcs.fft(u, output=funcs.get_temp_mem(u))
-#     if output is None:
-#         ab = gpuarray.zeros_like(af)
-#     else:
-#         param_check(u=u, output=output)
-#         if output.dtype != u.dtype:
-#             raise ValueError("incompatible output memory")
-#         ab = output
-#         zero = np.zeros((), u.dtype)
-#         ab.fill(zero)
-#     # Variables: af = fft(u), ab = 0, u is not changed
-#     funcs.merge_prop_kernel(af, ab, funcs.kz_gpu)
-#     ud = funcs.ifft(ab)
-#     return ud
+def u_mul(u, mul, copy=False, stream=None):
+    funcs = get_funcs(u, model="any", stream=stream)
+    if copy:
+        out = gpuarray.to_gpu_async(u, stream=stream)
+    else:
+        out = u
+    funcs.mul(out, mul)
+    return out
 
 
 def merge_prop(uf, ub, copy=False, stream=None):
