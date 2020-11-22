@@ -2,7 +2,7 @@ from pycuda.gpuarray import GPUArray
 from pycuda.driver import Stream
 from typing import Literal, Optional, List, Union
 import numpy as np
-from ssnp.utils import Multipliers
+from ssnp.utils import Multipliers, Config
 from ssnp.funcs import Funcs
 
 G_PRO = Union[GPUArray, property]
@@ -19,6 +19,8 @@ class BeamArray:
     DERIVATIVE = 0
     BACKWARD = 1
     relation: Literal[0, 1]
+    _config: Optional[Config]
+    config: Config
     _get_array_times: int
     _u1: GPUArray
     _u2: Optional[GPUArray]

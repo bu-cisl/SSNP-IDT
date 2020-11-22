@@ -1,5 +1,4 @@
 from functools import lru_cache
-
 from pycuda import gpuarray, driver as cuda
 
 
@@ -11,7 +10,8 @@ def param_check(**kwargs):
         if arr is None:
             continue
         # type check
-        assert isinstance(arr, gpuarray.GPUArray)
+        if not isinstance(arr, gpuarray.GPUArray):
+            raise TypeError(f"'{name}' is not a GPUArray")
         # shape check
         if name0 is None:
             name0 = name
@@ -37,6 +37,20 @@ def get_stream_in_current():
 class Config:
     _res = None
     _n0 = 1
+    _xyz = None
+    _lambda = None
+
+    @property
+    def xyz(self):
+        if self._xyz is None:
+            raise AttributeError("xyz is uninitialized")
+        return self._xyz
+
+    @property
+    def lambda0(self):
+        if self._lambda is None:
+            raise AttributeError("wave length is uninitialized")
+        return self._lambda
 
     @property
     def res(self):
@@ -50,8 +64,39 @@ class Config:
 
     @res.setter
     def res(self, value):
+        # if self._res is not None:
+        #     warn(f"resetting res value from {self._res}")
         self._res = tuple(float(res_i) for res_i in value)
         assert len(self._res) == 3
+
+    @xyz.setter
+    def xyz(self, value):
+        self._xyz = tuple(float(size_i) for size_i in value)
+        assert len(self._xyz) == 3
+        self._try_calc_res()
+
+    @lambda0.setter
+    def lambda0(self, value):
+        self._lambda = float(value)
+        self._try_calc_res()
+
+    @n0.setter
+    def n0(self, value):
+        self._try_n0fix_res(value)
+        self._n0 = float(value)
+
+    def _try_calc_res(self):
+        try:
+            self.res = (size_i / self.lambda0 for size_i in self.xyz)
+            self.res = (res_i * self.n0 for res_i in self.res)
+        except AttributeError:
+            pass
+
+    def _try_n0fix_res(self, new_value):
+        try:
+            self.res = (res_i / self._n0 * new_value for res_i in self.res)
+        except AttributeError:
+            pass
 
     def __call__(self, **kwargs):
         for key in kwargs:

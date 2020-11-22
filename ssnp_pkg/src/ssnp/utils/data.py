@@ -135,7 +135,8 @@ def read(source, dtype=None, shape=None, *, scale=1., gpu=True, pagelocked=False
     return arr
 
 
-def tiff_write(path, arr, *, scale=1, pre_operator: callable = None, dtype=np.uint16, compress: bool = True):
+def tiff_write(path, arr, *, scale=1, pre_operator: callable = None, dtype=np.uint16,
+               compress: bool = True, photometric=None):
     """
     Export a list of Tensors to a multi-page tiff
 
@@ -155,11 +156,16 @@ def tiff_write(path, arr, *, scale=1, pre_operator: callable = None, dtype=np.ui
     :param pre_operator: Preprocess function before scaling
     :param dtype: Color depth of the exported image
     :param compress: Using lossless compression
+    :param photometric:
     """
     arr = np.squeeze(arr)
-    if len(arr.shape) == 2:
+    shape = arr.shape
+    if photometric == 'rgb':
+        assert shape[-1] == 3, "rgb need exactly 3 channels"
+        shape = shape[:-1]
+    if len(shape) == 2:
         arr = [arr]
-    elif len(arr.shape) != 3:
+    elif len(shape) != 3:
         raise ValueError(f"Must export 2-D or 3-D array but got {len(arr.shape)}-D data, "
                          f"shape {arr.shape}.")
     with TiffWriter(path) as out_file:
@@ -175,9 +181,9 @@ def tiff_write(path, arr, *, scale=1, pre_operator: callable = None, dtype=np.ui
                 raise TypeError(f"dtype should be either np.uint8 or np.uint16, but not {dtype}") from None
             i = i.astype(dtype)
             if compress:
-                out_file.save(i, compress=9, predictor=True)
+                out_file.save(i, compress=9, predictor=True, photometric=photometric)
             else:
-                out_file.save(i)
+                out_file.save(i, photometric=photometric)
 
 
 def np_write(path, arr, *, scale=1., pre_operator=None, dtype=None, compress=True):

@@ -204,6 +204,9 @@ class Multipliers:
         xy_size = self._xy_size
         sigma = float(sigma)
         mu = tuple(float(i) for i in mu)
+        for i in mu:
+            if i > 1 or i < 0:
+                warn("mu value is out of normal range 0~1")
         key = ("ga", round(sigma * 100), tuple(round(i * 100) for i in mu))
 
         def calc():

@@ -4,7 +4,7 @@ from ssnp.funcs import BPMFuncs, SSNPFuncs, Funcs
 from ssnp.utils import param_check, config as global_config, Multipliers
 
 
-def ssnp_step(u, u_d, dz, n=None, output=None, stream=None):
+def ssnp_step(u, u_d, dz, n=None, output=None, config=None, stream=None):
     """
     SSNP main operation of one step
 
@@ -13,6 +13,7 @@ def ssnp_step(u, u_d, dz, n=None, output=None, stream=None):
     :param dz: step size along z axis
     :param n: refractive index along x-y distribution in this slice. Use background N0 if not provided.
     :param output:
+    :param config:
     :param stream:
     :return: new (u, u_d) after a step towards +z direction
     """
@@ -21,7 +22,7 @@ def ssnp_step(u, u_d, dz, n=None, output=None, stream=None):
         param_check(u=u[0], n=n)
     else:
         param_check(u=u, u_d=u_d, n=n, output=output)
-    funcs: SSNPFuncs = get_funcs(u, model="ssnp", stream=stream)
+    funcs: SSNPFuncs = get_funcs(u, config, model="ssnp", stream=stream)
     a = funcs.fft(u, output=output)
     a_d = funcs.fft(u_d, output=output)
     funcs.diffract(a, a_d, dz)
@@ -33,7 +34,7 @@ def ssnp_step(u, u_d, dz, n=None, output=None, stream=None):
     return u, u_d
 
 
-def bpm_step(u, dz, n=None, output=None, stream=None):
+def bpm_step(u, dz, n=None, output=None, config=None, stream=None):
     """
     BPM main operation of one step
 
@@ -41,6 +42,7 @@ def bpm_step(u, dz, n=None, output=None, stream=None):
     :param dz: step size along z axis
     :param n: refractive index along x-y distribution in this slice. Use background N0 if not provided.
     :param output:
+    :param config:
     :param stream:
     :return: new (u, u_d) after a step towards +z direction
     """
@@ -49,7 +51,7 @@ def bpm_step(u, dz, n=None, output=None, stream=None):
         param_check(u=u[0], n=n)
     else:
         param_check(u=u, n=n, output=output)
-    funcs: BPMFuncs = get_funcs(u, model="bpm", stream=stream)
+    funcs: BPMFuncs = get_funcs(u, config, model="bpm", stream=stream)
     a = funcs.fft(u, output=output)
     funcs.diffract(a, dz)
     u = funcs.ifft(a)
@@ -58,10 +60,10 @@ def bpm_step(u, dz, n=None, output=None, stream=None):
     return u
 
 
-def bpm_grad_bp(u, ug, dz, n=None, ng=None, stream=None):
+def bpm_grad_bp(u, ug, dz, n=None, ng=None, config=None, stream=None):
     param_check(u_1=u, u_grad=ug, n_grad=ng)
     param_check(u_1=u[0] if len(u.shape) == 3 else u, n=n)
-    funcs: BPMFuncs = get_funcs(ug, model="bpm", stream=stream)
+    funcs: BPMFuncs = get_funcs(ug, config, model="bpm", stream=stream)
     if n is not None:
         funcs.scatter_g(u, n, ug, ng, dz)
     with funcs.fourier(ug) as ag:
@@ -69,10 +71,10 @@ def bpm_grad_bp(u, ug, dz, n=None, ng=None, stream=None):
     return ng
 
 
-def ssnp_grad_bp(u, ug, u_dg, dz, n=None, ng=None, stream=None):
+def ssnp_grad_bp(u, ug, u_dg, dz, n=None, ng=None, config=None, stream=None):
     param_check(u_1=u, u_grad=ug, u_d_grad=u_dg, n_grad=ng)
     param_check(u_1=u[0] if len(u.shape) == 3 else u, n=n)
-    funcs: SSNPFuncs = get_funcs(ug, model="ssnp", stream=stream)
+    funcs: SSNPFuncs = get_funcs(ug, config, model="ssnp", stream=stream)
     if n is not None:
         funcs.scatter_g(u, n, ug, u_dg, ng, dz)
     with funcs.fourier(ug) as ag, funcs.fourier(u_dg) as a_dg:
@@ -151,9 +153,9 @@ def u_mul(u, mul, copy=False, stream=None):
     return out
 
 
-def merge_prop(uf, ub, copy=False, stream=None):
+def merge_prop(uf, ub, config=None, copy=False, stream=None):
     param_check(uf=uf, ub=ub)
-    funcs = get_funcs(uf, model="ssnp", stream=stream)
+    funcs = get_funcs(uf, config, model="ssnp", stream=stream)
     af = funcs.fft(uf, copy=copy)
     ab = funcs.fft(ub, copy=copy)
     funcs.merge_prop(af, ab)
@@ -162,9 +164,9 @@ def merge_prop(uf, ub, copy=False, stream=None):
     return u, u_d
 
 
-def split_prop(u, u_d, copy=False, stream=None):
+def split_prop(u, u_d, config=None, copy=False, stream=None):
     param_check(u=u, u_d=u_d)
-    funcs = get_funcs(u, model="ssnp", stream=stream)
+    funcs = get_funcs(u, config, model="ssnp", stream=stream)
     a = funcs.fft(u, copy=copy)
     a_d = funcs.fft(u_d, copy=copy)
     funcs.split_prop(a, a_d)
@@ -173,9 +175,9 @@ def split_prop(u, u_d, copy=False, stream=None):
     return uf, ud
 
 
-def merge_grad(ufg, ubg, copy=False, stream=None):
+def merge_grad(ufg, ubg, config=None, copy=False, stream=None):
     param_check(uf_grad=ufg, ub_grad=ubg)
-    funcs = get_funcs(ufg, model="ssnp", stream=stream)
+    funcs = get_funcs(ufg, config, model="ssnp", stream=stream)
     afg = funcs.fft(ufg, copy=copy)
     abg = funcs.fft(ubg, copy=copy)
     funcs.merge_grad(afg, abg)
@@ -188,9 +190,13 @@ def get_funcs(arr_like, config=None, *, model="any", stream=None, fft_type="skcu
     name = model.lower()
     if config is None:
         config = global_config
-    res = config.res
+    if name == "any":
+        res = n0 = None
+    else:
+        res = config.res
+        n0 = config.n0
     try:
         model_init = {"ssnp": SSNPFuncs, "bpm": BPMFuncs, "any": Funcs}[name]
     except KeyError:
         raise ValueError(f"unknown model {model}") from None
-    return model_init(arr_like, res, config.n0, stream, fft_type)
+    return model_init(arr_like, res, n0, stream, fft_type)

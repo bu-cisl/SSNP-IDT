@@ -87,20 +87,21 @@ class Funcs:
         self.shape = shape
         self.batch = batch
 
-        # multipliers
-        self._prop_cache = {}
-        self._pupil_cache = {}
-        self.res = res
-        self.n0 = n0
-        self.multiplier = Multipliers(shape, res, stream)
-        c_gamma = self.multiplier.c_gamma()
-        c_gamma = np.broadcast_to(c_gamma, arr_like.shape)
-        kz = c_gamma * (2 * np.pi * res[2] * n0)
-        self.kz = kz.astype(np.double)
-        self.kz_gpu = gpuarray.to_gpu(kz)
-        self.eva = np.exp(np.minimum((c_gamma - 0.2) * 5, 0))
+        # kz and related multipliers
+        if type(self) is not Funcs:
+            self._prop_cache = {}
+            self._pupil_cache = {}
+            self.res = res
+            self.n0 = n0
+            self.multiplier = Multipliers(shape, res, stream)
+            c_gamma = self.multiplier.c_gamma()
+            c_gamma = np.broadcast_to(c_gamma, arr_like.shape)
+            kz = c_gamma * (2 * np.pi * res[2])
+            self.kz = kz.astype(np.double)
+            self.kz_gpu = gpuarray.to_gpu(kz)
+            self.eva = np.exp(np.minimum((c_gamma - 0.2) * 5, 0))
 
-        # function interface
+        # function interface todo add non-complex mul
         self.mul_conj_krn = elementwise.ElementwiseKernel(
             "double2 *ug, double2 *mul",
             f"""
@@ -324,7 +325,7 @@ class SSNPFuncs(Funcs):
                 "double2 *u, double2 *ud, double *n_",
                 f"""
                     temp = n_[i % (n / {self.batch})];
-                    temp = {phase_factor} * temp * ({2 * n0} + temp);
+                    temp = {phase_factor / n0 ** 2} * temp * ({2 * n0} + temp);
                     ud[i].x -= temp * u[i].x;
                     ud[i].y -= temp * u[i].y;
                 """,

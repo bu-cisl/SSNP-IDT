@@ -1,14 +1,15 @@
 """
 Module for BeamArray class
 """
+from warnings import warn
+import copy
 from collections import Iterable
 from numbers import Number
 import numpy as np
 from pycuda import gpuarray
 from pycuda.gpuarray import GPUArray
-from warnings import warn
 from ssnp import calc
-from ssnp.utils import param_check
+from ssnp.utils import param_check, Config
 
 
 class BeamArray:
@@ -22,6 +23,7 @@ class BeamArray:
     dtype = np.complex128
     DERIVATIVE = 0
     BACKWARD = 1
+    _config = None
 
     def __init__(self, u1, u2=None, relation=BACKWARD, total_ops=0, stream=None):
         def to_gpu(u, name):
@@ -54,14 +56,30 @@ class BeamArray:
             self._u2 = None
         self._tape = []
         self._array_pool = []
-        shape = self._u1.shape[-2:]
-        self.multiplier = calc.get_multiplier(shape, stream=stream)
+        self.shape = shape[-2:]
+        # self.multiplier = calc.get_multiplier(shape, stream=stream)
         self._get_array_times = 0
 
         max_ops = int(np.sqrt(2 * total_ops)) + 1 if total_ops > 0 else 0
         self.ops_number = {"max": max_ops, "remainder": max_ops, "current": max_ops}
         self._fft_funcs = calc.get_funcs(self._u1, stream=stream)
         self.stream = stream
+
+    @property
+    def multiplier(self):
+        res = None if self._config is None else self._config.res
+        return calc.get_multiplier(self.shape, res, stream=self.stream)
+
+    @property
+    def config(self):
+        if self._config is None:
+            self._config = Config()
+        return self._config
+
+    @config.setter
+    def config(self, value):
+        assert isinstance(value, Config)
+        self._config = copy.copy(value)
 
     def _get_array(self):
         if len(self._array_pool) == 0:
@@ -78,12 +96,12 @@ class BeamArray:
 
     def split_prop(self):
         if self.relation == BeamArray.DERIVATIVE:
-            calc.split_prop(self._u1, self._u2, stream=self.stream)
+            calc.split_prop(self._u1, self._u2, self._config, stream=self.stream)
             self.relation = BeamArray.BACKWARD
 
     def merge_prop(self):
         if self.relation == BeamArray.BACKWARD:
-            calc.merge_prop(self._u1, self._u2, stream=self.stream)
+            calc.merge_prop(self._u1, self._u2, self._config, stream=self.stream)
             self.relation = BeamArray.DERIVATIVE
 
     @property
@@ -187,7 +205,7 @@ class BeamArray:
             self.backward = None
         self._parse(('bpm', self._u1), dz, n, track)
 
-    def n_grad(self, output=None):  # todo: correct output shape
+    def n_grad(self, output=None):  # todo: correct config tracking
         # output shape checking/setting
         scatter_num = 0
         ug = None
@@ -404,7 +422,7 @@ class BeamArray:
     def _parse(self, info, dz, n, track):
         def step(var_dz, var_n):
             if info[0] == 'bpm':
-                calc.bpm_step(info[1], var_dz, var_n)
+                calc.bpm_step(info[1], var_dz, var_n, config=self._config)
                 if track:
                     if var_n is None:
                         u_save = None
@@ -420,7 +438,7 @@ class BeamArray:
                             u_save = None
                     self._tape.append(['bpm', u_save, var_dz, var_n])
             elif info[0] == 'ssnp':
-                calc.ssnp_step(info[1], info[2], var_dz, var_n)
+                calc.ssnp_step(info[1], info[2], var_dz, var_n, config=self._config)
                 if track:
                     if var_n is None:
                         u_save = None
