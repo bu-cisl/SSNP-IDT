@@ -394,11 +394,11 @@ class BPMFuncs(Funcs):
             q_op = elementwise.ElementwiseKernel(
                 "double2 *u, double *n_",
                 f"""
-                    temp = n_[i % (n / {self.batch})];
-                    temp = make_cuDoubleComplex(cos(temp * {phase_factor}), sin(temp * {phase_factor}));
+                    ni = n_[i % (n / {self.batch})];
+                    temp = make_cuDoubleComplex(cos(ni * {phase_factor}), sin(ni * {phase_factor}));
                     u[i] = cuCmul(u[i], temp);
                 """,
-                loop_prep="double2 temp",
+                loop_prep="double2 temp, double ni",
                 preamble='#include "cuComplex.h"'
             )
             q_op_g = elementwise.ElementwiseKernel(

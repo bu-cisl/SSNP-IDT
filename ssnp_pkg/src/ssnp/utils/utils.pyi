@@ -1,4 +1,4 @@
-from typing import Tuple, Union
+from typing import Tuple, Union, List
 
 FFF_P = Union[Tuple[float, float, float], property]
 F_P = Union[float, property]
@@ -18,6 +18,13 @@ class Config:
     xyz: FFF_P
     lambda0: F_P
     n0: F_P
+    _callbacks: List[callable, ...]
+
+    def register_updater(self, updater): ...
+
+    def clear_updater(self): ...
+
+    def set(self, **kwargs): ...
 
 
 config: Config

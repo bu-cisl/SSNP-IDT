@@ -79,7 +79,7 @@ class BeamArray:
     @config.setter
     def config(self, value):
         assert isinstance(value, Config)
-        self._config = copy.copy(value)
+        self._config = copy.deepcopy(value)
 
     def _get_array(self):
         if len(self._array_pool) == 0:
