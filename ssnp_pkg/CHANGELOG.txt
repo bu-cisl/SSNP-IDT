@@ -2,12 +2,13 @@
 
 ### To do list in current version
 
+* Support background refractive index (n0 > 1) in gradient computation
+
+### 0.0.2.beta (developing)
+
 * Add skcuda as a substitution of reikna (no need to compile FFT)
 * Compute several illumination on the same object in a batch
-* Support background refractive index (n0 > 1)
-
-### 0.0.2.alpha (developing)
-
+* Support background refractive index (n0 > 1) in model computation
 * Add stream parameter for async operation and related small tools
 * Add cache to avoid unnecessary recompiling
 * Fix errors:

@@ -298,16 +298,16 @@ class BeamArray:
                     ufg = ug
                     ubg = self._get_array()
                     ubg.fill(np.array(0, self.dtype))
-                    u, u_dg = calc.merge_grad(ufg, ubg)
+                    u, u_dg = calc.merge_grad(ufg, ubg, self._config, stream=self.stream)
                 if n is None:
-                    calc.ssnp_grad_bp(u, ug, u_dg, dz)
+                    calc.ssnp_grad_bp(u, ug, u_dg, dz, config=self._config, stream=self.stream)
                 else:
                     scatter_num -= 1
                     if self.batch > 1:
-                        calc.ssnp_grad_bp(u, ug, u_dg, dz, n, ng_batch)
-                        calc.sum_batch(ng_batch, output[scatter_num])
+                        calc.ssnp_grad_bp(u, ug, u_dg, dz, n, ng_batch, self._config, self.stream)
+                        calc.sum_batch(ng_batch, output[scatter_num], self.stream)
                     else:
-                        calc.ssnp_grad_bp(u, ug, u_dg, dz, n, output[scatter_num])
+                        calc.ssnp_grad_bp(u, ug, u_dg, dz, n, output[scatter_num], self._config, self.stream)
                     self.recycle_array(u)
 
             elif op[0] == "u*":
@@ -471,8 +471,27 @@ class BeamArray:
                 for ni in n:
                     step(dz, ni)
 
-    def __del__(self):
-        # for arr in self._array_pool:
-        #     del arr
-        del self._u1
-        del self._u2
+    # def __del__(self):
+    #     # for arr in self._array_pool:
+    #     #     del arr
+    #     del self._u1
+    #     del self._u2
+
+    def __repr__(self):
+        if self._u2:
+            if self.relation == BeamArray.DERIVATIVE:
+                beam_type = "derivative"
+                data = ("total complex field U", "diff[U(z), z]")
+            elif self.relation == BeamArray.BACKWARD:
+                beam_type = "backward"
+                data = ("forward component Uf", "backward component Ub")
+            else:
+                raise TypeError("unknown beam type")
+
+            beam_type = "bi-directional beam, additional data is " + beam_type
+            data = f"{{{data[0]}:\n{self._u1},\n{data[1]}:\n{self._u2}}}"
+        else:
+            beam_type = "forward-only beam"
+            data = f"{{complex field U:\n{self._u1}}}"
+
+        return f"{{size: {self.shape},\nbeam type: {beam_type},\ndata: {data}\n}}"
