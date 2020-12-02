@@ -3,7 +3,7 @@ from typing import Literal
 import numpy as np
 from pycuda.gpuarray import GPUArray
 from pycuda.elementwise import ElementwiseKernel
-from pycuda.driver import Stream
+from pycuda.driver import Stream, Function
 from pycuda.reduction import ReductionKernel
 from reikna.core.computation import ComputationCallable
 from .utils import Multipliers
@@ -69,9 +69,11 @@ class Funcs:
 
     def sum_batch(self, batch: GPUArray, sum_: GPUArray): ...
 
-    def mul(self, u: GPUArray, mul: GPUArray): ...
+    @staticmethod
+    def op_krn(*args, **kwargs) -> Function: ...
 
-    def mul_conj(self, ug: GPUArray, mul: GPUArray): ...
+    def op(self, x: GPUArray, operator: Literal["+", "-", "*", "/"], y: GPUArray, out: GPUArray = None,
+           name: str = None, y_func: str = None): ...
 
 
 class BPMFuncs(Funcs):

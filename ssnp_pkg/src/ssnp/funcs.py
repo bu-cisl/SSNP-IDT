@@ -1,5 +1,6 @@
 from pycuda import elementwise, gpuarray, reduction
 from pycuda.gpuarray import GPUArray
+from pycuda.tools import dtype_to_ctype
 import numpy as np
 from ssnp.utils import Multipliers, get_stream_in_current
 from contextlib import contextmanager
@@ -101,21 +102,7 @@ class Funcs:
             self.kz_gpu = gpuarray.to_gpu(kz)
             self.eva = np.exp(np.minimum((c_gamma - 0.2) * 5, 0))
 
-        # function interface todo add non-complex mul
-        self.mul_conj_krn = elementwise.ElementwiseKernel(
-            "double2 *ug, double2 *mul",
-            f"""
-            ug[i] = cuCmul(ug[i], cuConj(mul[i % (n / {self.batch})]));
-            """,
-            preamble='#include "cuComplex.h"'
-        )
-        self.mul_krn = elementwise.ElementwiseKernel(
-            "double2 *u, double2 *mul",
-            f"""
-            u[i] = cuCmul(u[i], mul[i % (n / {self.batch})]);
-            """,
-            preamble='#include "cuComplex.h"'
-        )
+        # function interface
         self.sum_cmplx_batch_krn = elementwise.ElementwiseKernel(
             "double2 *out, double2 *u",
             f"""
@@ -140,8 +127,29 @@ class Funcs:
         # self.reduce_mse_cc = partial(self.reduce_mse_cc_krn, stream=stream)
         # self.mse_cc_grad = partial(self.mse_cc_grad_krn, stream=stream)
         # self.mse_cr_grad = partial(self.mse_cr_grad_krn, stream=stream)
-        self.mul = partial(self.mul_krn, stream=stream)
-        self.mul_conj = partial(self.mul_conj_krn, stream=stream)
+
+    @staticmethod
+    @lru_cache
+    def op_krn(batch, xt, yt, zt, operator, name=None, y_func=None):
+        y_i = f"y[i % (n / {batch})]"
+        if y_func is not None:
+            y_i = f"{y_func}(y_i)"
+        return elementwise.get_elwise_kernel(
+            f"{xt} *x, {yt} *y, {zt} *z",
+            f"z[i] = x[i] {operator} {y_i}",
+            name or "op")
+
+    def op(self, x, operator, y, out=None, **kwargs):
+        if out is None:
+            out = x
+        xt = dtype_to_ctype(x.dtype)
+        yt = dtype_to_ctype(y.dtype)
+        zt = dtype_to_ctype(out.dtype)
+        func = self.op_krn(self.batch, xt, yt, zt, operator, **kwargs)
+        func.prepared_async_call(x._grid, x._block, self.stream,
+                                 x.gpudata, y.gpudata,
+                                 out.gpudata, x.mem_size)
+        return out
 
     def reduce_mse(self, field, measurement):
         if field.dtype == np.complex128:

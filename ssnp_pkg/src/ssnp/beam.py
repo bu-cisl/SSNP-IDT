@@ -312,17 +312,17 @@ class BeamArray:
 
             elif op[0] == "u*":
                 _, mul = op
-                calc.u_mul_conj(ug, mul)
+                calc.u_mul(ug, mul, conj=True)
                 if u_dg is not None:
-                    calc.u_mul_conj(u_dg, mul)
+                    calc.u_mul(u_dg, mul, conj=True)
 
             elif op[0] == "a*":
                 _, mul = op
                 with self._fft_funcs.fourier(ug):
-                    calc.u_mul_conj(ug, mul)
+                    calc.u_mul(ug, mul, conj=True)
                 if u_dg is not None:
                     with self._fft_funcs.fourier(u_dg):
-                        calc.u_mul_conj(u_dg, mul)
+                        calc.u_mul(u_dg, mul, conj=True)
             else:
                 raise NotImplementedError(f"unknown operation {op[0]}")
         assert scatter_num == 0
@@ -346,7 +346,7 @@ class BeamArray:
         :param hold: some part not perform multiply
         :param track: track this operation for gradient calculation
         """
-        param_check(field=self._u1, multiplier=arr, hold=None if hold is None else hold._u1)
+        param_check(field=self._u1, multiplier=arr, hold=hold and hold._u1)
         if hold is not None:
             self.__isub__(hold)
             self.mul(arr, track=track)
@@ -354,7 +354,6 @@ class BeamArray:
         else:
             self.__imul__(arr)
             if track:
-                assert len(arr.shape) == 2
                 self._tape.append(("u*", arr))
 
     def a_mul(self, arr, hold=None, track=False):
@@ -377,28 +376,9 @@ class BeamArray:
                 self._tape.append(("a*", arr))
 
     def __imul__(self, other):  # todo: move to calc
-        if isinstance(other, GPUArray):
-            if len(other.shape) >= 3:  # if so, other must be full shape, or error
-                param_check(self=self._u1, other=other)
-                self._u1._elwise_multiply(other, self, stream=self.stream)
-                if self._u2 is not None:
-                    self._u2._elwise_multiply(other, self, stream=self.stream)
-                return self
-
-            # use batch compatible multiply
-            elif self.batch > 1:  # otherwise, if 3D broadcasting needed
-                param_check(self=self._u1[0], other=other)
-            else:  # normal 2D * 2D
-                param_check(self=self._u1, other=other)
-            calc.u_mul(self._u1, other, stream=self.stream)
-            if self._u2 is not None:
-                calc.u_mul(self._u2, other, stream=self.stream)
-
-        else:
-            # use number multiply
-            self._u1._axpbz(other, 0, self, stream=self.stream)
-            if self._u2 is not None:
-                self._u2._axpbz(other, 0, self, stream=self.stream)
+        calc.u_mul(self._u1, other, stream=self.stream)
+        if self._u2 is not None:
+            calc.u_mul(self._u2, other, stream=self.stream)
         return self
 
     @staticmethod
