@@ -1,7 +1,7 @@
 import warnings
 
 
-def test():
+def pycuda_test():
     from pycuda.compiler import preprocess_source
     from pycuda.driver import CompileError
     from pytools.prefork import ExecError
@@ -31,4 +31,4 @@ def autoinit():
 
 
 autoinit()
-test()
+pycuda_test()

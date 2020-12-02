@@ -10,6 +10,7 @@ from pycuda import gpuarray
 from pycuda.gpuarray import GPUArray
 from ssnp import calc
 from ssnp.utils import param_check, Config
+import logging
 
 
 class BeamArray:
@@ -74,20 +75,34 @@ class BeamArray:
     def config(self):
         if self._config is None:
             self._config = Config()
+            self.register_config_updater()
+
         return self._config
 
     @config.setter
     def config(self, value):
         assert isinstance(value, Config)
         self._config = copy.deepcopy(value)
+        self._config.clear_updater()
+        self.register_config_updater()
+
+    def register_config_updater(self):
+        def update(attr, **_):
+            if self._u2 is not None:
+                if attr == 'res':
+                    self.split_prop()
+                elif attr == 'n0':
+                    self.merge_prop()
+
+        self._config.register_updater(update)
 
     def _get_array(self):
-        if len(self._array_pool) == 0:
-            self._get_array_times += 1
-            print(f"get array times: {self._get_array_times}")
-            return gpuarray.empty_like(self._u1)
-        else:
+        if self._array_pool:
             return self._array_pool.pop()
+        else:
+            self._get_array_times += 1
+            logging.info(f"get array times: {self._get_array_times}")
+            return gpuarray.empty_like(self._u1)
 
     def recycle_array(self, arr):
         param_check(beam=self._u1, recycle=arr)
@@ -95,11 +110,17 @@ class BeamArray:
         self._array_pool.append(arr)
 
     def split_prop(self):
+        if self._u2 is None:
+            warn("split_prop for forward-only beam is useless")
+            return
         if self.relation == BeamArray.DERIVATIVE:
             calc.split_prop(self._u1, self._u2, self._config, stream=self.stream)
             self.relation = BeamArray.BACKWARD
 
     def merge_prop(self):
+        if self._u2 is None:
+            warn("merge_prop for forward-only beam is useless")
+            return
         if self.relation == BeamArray.BACKWARD:
             calc.merge_prop(self._u1, self._u2, self._config, stream=self.stream)
             self.relation = BeamArray.DERIVATIVE
@@ -471,7 +492,7 @@ class BeamArray:
                     step(dz, ni)
 
     def __del__(self):
-        for arr in self._array_pool:
-            del arr
+        # for arr in self._array_pool:
+        #     del arr
         del self._u1
         del self._u2

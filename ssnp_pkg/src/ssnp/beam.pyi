@@ -20,7 +20,7 @@ class BeamArray:
     BACKWARD = 1
     relation: Literal[0, 1]
     _config: Optional[Config]
-    config: Config
+    config: Union[Config, property]
     _get_array_times: int
     _u1: GPUArray
     _u2: Optional[GPUArray]
