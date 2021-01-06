@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Dict
 
 import numpy as np
 from pycuda.gpuarray import GPUArray
@@ -10,6 +10,7 @@ from .utils import Multipliers
 
 
 class Funcs:
+    _funcs_cache: Dict[tuple, Funcs]
     shape: tuple
     batch: int
     res: tuple
@@ -35,6 +36,8 @@ class Funcs:
 
     def __init__(self, arr_like: GPUArray, res, n0, stream: Stream = None,
                  fft_type: Literal["reikna", "skcuda"] = "reikna"): ...
+
+    def _initialized(self) -> bool: ...
 
     @staticmethod
     def _compile_fft(shape, dtype, stream): ...

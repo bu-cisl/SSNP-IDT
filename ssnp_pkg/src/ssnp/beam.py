@@ -471,11 +471,12 @@ class BeamArray:
                 for ni in n:
                     step(dz, ni)
 
-    # def __del__(self):
-    #     # for arr in self._array_pool:
-    #     #     del arr
-    #     del self._u1
-    #     del self._u2
+    def __del__(self):
+        for arr in self._array_pool:
+            arr.gpudata.free()
+        self._u1.gpudata.free()
+        if isinstance(self._u2, GPUArray):
+            self._u2.gpudata.free()
 
     def __repr__(self):
         if self._u2:

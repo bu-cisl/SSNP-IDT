@@ -18,7 +18,7 @@ n = ssnp.read("bb.tiff", dtype=np.double)
 n *= 0.
 ng = gpuarray.empty_like(n)
 ng_total = gpuarray.empty_like(n)
-
+ANGLE_NUM = 8
 NA = 0.65
 
 u_list = []
@@ -26,8 +26,8 @@ u_plane = ssnp.read("plane", np.complex128, shape=n.shape[1:])
 beam = BeamArray(u_plane, total_ops=len(n))
 pupil = beam.multiplier.binary_pupil(0.6501, gpu=True)
 
-for num in range(8):
-    xy_theta = num / 8 * 2 * np.pi
+for num in range(ANGLE_NUM):
+    xy_theta = num / ANGLE_NUM * 2 * np.pi
     c_ab = NA * np.cos(xy_theta), NA * np.sin(xy_theta)
     u = u_plane * beam.multiplier.tilt(c_ab, trunc=True, gpu=True)
     u_list.append(u)
@@ -38,7 +38,7 @@ t = time()
 for step in range(5):
     print(f"Step: {step}")
     ng_total *= 0
-    for num in range(8):
+    for num in range(ANGLE_NUM):
         beam.forward = u_list[num]
         beam.backward = 0
         beam.ssnp(1, n, track=True)

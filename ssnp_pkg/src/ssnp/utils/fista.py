@@ -7,17 +7,9 @@ import pycuda.reduction
 from pycuda.gpuarray import GPUArray
 from functools import lru_cache
 
-import ssnp
-from ssnp.calc import get_funcs
-
-try:
-    ssnp.config.res
-except AttributeError:
-    ssnp.config.res = (1, 1, 1)
-
 discontig_sub_kernel = pycuda.elementwise.ElementwiseKernel(
     # mem range safe, since i>=step, i-step>=0
-    "double *arr, double *out, int step, int length, int transpose",
+    "double *arr, double *out, unsigned step, unsigned length, unsigned transpose",
     """
     if (i % length >= step) {
         if (transpose)
@@ -168,6 +160,7 @@ def prox_tv_Michael(x, tv_parameter=1.0):
 
 
 def prox_tv(y: GPUArray, lam):
+    from ssnp.calc import get_funcs
     funcs = get_funcs(y.astype(np.complex128))
     fft, ifft = funcs.fft, funcs.ifft
 

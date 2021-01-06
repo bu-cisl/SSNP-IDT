@@ -56,9 +56,9 @@ class Funcs:
             return cls._funcs_cache[key]
 
     def __init__(self, arr_like, res, n0, stream=None, fft_type="reikna"):
-        if self._funcs_cache is None:
+        if self._initialized():
             return
-        self._funcs_cache = None  # only for mark as initialized
+        self._funcs_cache = None  # only used for mark `self` as initialized
 
         if stream is None:
             stream = get_stream_in_current()
@@ -127,6 +127,9 @@ class Funcs:
         # self.reduce_mse_cc = partial(self.reduce_mse_cc_krn, stream=stream)
         # self.mse_cc_grad = partial(self.mse_cc_grad_krn, stream=stream)
         # self.mse_cr_grad = partial(self.mse_cr_grad_krn, stream=stream)
+
+    def _initialized(self):
+        return self._funcs_cache is None
 
     @staticmethod
     @lru_cache
@@ -264,57 +267,70 @@ class Funcs:
 
 class SSNPFuncs(Funcs):
     _funcs_cache = {}
-    _fused_mam_callable_krn = elementwise.ElementwiseKernel(
-        "double2 *a, double2 *b, "
-        "double2 *p00, double2 *p01, double2 *p10, double2 *p11",
-        """
-        temp = cuCfma(a[i], p00[i], cuCmul(b[i], p01[i]));
-        b[i] = cuCfma(a[i], p10[i], cuCmul(b[i], p11[i]));
-        a[i] = temp;
-        """,
-        loop_prep="cuDoubleComplex temp",
-        preamble='#include "cuComplex.h"',
-        name='fused_mam'
-    )
-    _split_prop_krn = elementwise.ElementwiseKernel(
-        # ab = (a + I a_d / kz) / 2
-        # af = a - ab = (a - I a_d / kz) / 2
-        "double2 *a, double2 *a_d, double *kz",
-        """
-        temp.x = (cuCreal(a[i]) - cuCimag(a_d[i])/kz[i])*0.5;
-        temp.y = (cuCimag(a[i]) + cuCreal(a_d[i])/kz[i])*0.5;
-        a_d[i] = temp;
-        a[i] = cuCsub(a[i], a_d[i]);
-        """,
-        loop_prep="cuDoubleComplex temp",
-        preamble='#include "cuComplex.h"'
-    )
-    _merge_prop_krn = elementwise.ElementwiseKernel(
-        # a = af + ab
-        # a_d = (af - ab) * I kz
-        "double2 *af, double2 *ab, double *kz",
-        """
-        temp = cuCsub(af[i], ab[i]);
-        af[i] = cuCadd(af[i], ab[i]);
-        ab[i] = make_cuDoubleComplex(-cuCimag(temp)*kz[i], cuCreal(temp)*kz[i]);
-        """,
-        loop_prep="cuDoubleComplex temp",
-        preamble='#include "cuComplex.h"'
-    )
-    _merge_grad_krn = elementwise.ElementwiseKernel(
-        # ag = (afg + abg) / 2
-        # a_dg = (afg - abg) / 2 * I / kz
-        "double2 *afg, double2 *abg, double *kz",
-        """
-        afg[i].x *= 0.5; afg[i].y *= 0.5;
-        abg[i].x *= 0.5; abg[i].y *= 0.5;
-        temp = cuCsub(afg[i], abg[i]);
-        afg[i] = cuCadd(afg[i], abg[i]);
-        abg[i] = make_cuDoubleComplex(-cuCimag(temp)/kz[i], cuCreal(temp)/kz[i]);
-        """,
-        loop_prep="cuDoubleComplex temp",
-        preamble='#include "cuComplex.h"'
-    )
+
+    def __init__(self, *args, **kwargs):
+        if self._initialized():
+            return
+        super(SSNPFuncs, self).__init__(*args, **kwargs)
+        self._fused_mam_callable_krn = elementwise.ElementwiseKernel(
+            "double2 *a, double2 *b, "
+            "double2 *p00, double2 *p01, double2 *p10, double2 *p11",
+            f"""
+            p_i = i % (n / {self.batch});
+            temp = cuCfma(a[i], p00[p_i], cuCmul(b[i], p01[p_i]));
+            b[i] = cuCfma(a[i], p10[p_i], cuCmul(b[i], p11[p_i]));
+            a[i] = temp;
+            """,
+            loop_prep="cuDoubleComplex temp; unsigned p_i",
+            preamble='#include "cuComplex.h"',
+            name=f'fused_mam_{self.batch}'
+        )
+
+        # share these definition to avoid mistakes
+        kzi_init = f"kzi = kz[i % (n / {self.batch})];"
+        local_vars = "cuDoubleComplex temp; double kzi"
+        self._split_prop_krn = elementwise.ElementwiseKernel(
+            # ab = (a + I a_d / kz) / 2
+            # af = a - ab = (a - I a_d / kz) / 2
+            "double2 *a, double2 *a_d, double *kz",
+            f"""
+            {kzi_init}
+            temp.x = (cuCreal(a[i]) - cuCimag(a_d[i])/kzi)*0.5;
+            temp.y = (cuCimag(a[i]) + cuCreal(a_d[i])/kzi)*0.5;
+            a_d[i] = temp;
+            a[i] = cuCsub(a[i], a_d[i]);
+            """,
+            loop_prep=local_vars,
+            preamble='#include "cuComplex.h"'
+        )
+        self._merge_prop_krn = elementwise.ElementwiseKernel(
+            # a = af + ab
+            # a_d = (af - ab) * I kz
+            "double2 *af, double2 *ab, double *kz",
+            f"""
+            {kzi_init}
+            temp = cuCsub(af[i], ab[i]);
+            af[i] = cuCadd(af[i], ab[i]);
+            ab[i] = make_cuDoubleComplex(-cuCimag(temp)*kzi, cuCreal(temp)*kzi);
+            """,
+            loop_prep=local_vars,
+            preamble='#include "cuComplex.h"'
+        )
+        self._merge_grad_krn = elementwise.ElementwiseKernel(
+            # ag = (afg + abg) / 2
+            # a_dg = (afg - abg) / 2 * I / kz
+            "double2 *afg, double2 *abg, double *kz",
+            f"""
+            {kzi_init}
+            afg[i].x *= 0.5; afg[i].y *= 0.5;
+            abg[i].x *= 0.5; abg[i].y *= 0.5;
+            temp = cuCsub(afg[i], abg[i]);
+            afg[i] = cuCadd(afg[i], abg[i]);
+            abg[i] = make_cuDoubleComplex(-cuCimag(temp)/kzi, cuCreal(temp)/kzi);
+            """,
+            loop_prep=local_vars,
+            preamble='#include "cuComplex.h"'
+        )
 
     def _get_prop(self, dz):
         res = self.res
@@ -426,12 +442,14 @@ class BPMFuncs(Funcs):
             self._prop_cache[key] = new_prop
             return new_prop
 
-    def diffract(self, a, dz):
-        a._elwise_multiply(self._get_prop(dz)["P"], a, stream=self.stream)
+    def diffract(self, a, dz):  # todo: test it
+        self.op(a, "*", self._get_prop(dz)["P"])
+        # a._elwise_multiply(self._get_prop(dz)["P"], a, stream=self.stream)
         # a *= self._get_prop(dz)["P"]
 
     def diffract_g(self, ag, dz):
-        ag._elwise_multiply(self._get_prop(dz)["Pg"], ag, stream=self.stream)
+        self.op(ag, "*", self._get_prop(dz)["Pg"])
+        # ag._elwise_multiply(self._get_prop(dz)["Pg"], ag, stream=self.stream)
         # ag *= self._get_prop(dz)["Pg"]
 
     def scatter(self, u, n, dz):

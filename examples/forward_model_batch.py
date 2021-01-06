@@ -13,16 +13,17 @@ if platform.system() == 'Windows':
 import ssnp
 import ssnp.calc
 
+ANGLE_NUM = 8
 ssnp.config.res = (0.1, 0.1, 0.1)
 n = ssnp.read("bb.tiff", np.double)
 n *= 0.01
 NA = 0.65
 u = ssnp.read("plane", np.complex128, shape=n.shape[1:], gpu=False)
-u = np.broadcast_to(u, (8, *u.shape)).copy()
+u = np.broadcast_to(u, (ANGLE_NUM, *u.shape)).copy()
 beam = ssnp.BeamArray(u)
 
-for num in range(8):
-    xy_theta = num / 8 * 2 * np.pi
+for num in range(ANGLE_NUM):
+    xy_theta = num / ANGLE_NUM * 2 * np.pi
     c_ab = NA * np.cos(xy_theta), NA * np.sin(xy_theta)
     beam.forward[num] *= beam.multiplier.tilt(c_ab, trunc=True, gpu=True)
 
