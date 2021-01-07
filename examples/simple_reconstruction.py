@@ -41,10 +41,11 @@ for step in range(5):
     for num in range(ANGLE_NUM):
         beam.forward = u_list[num]
         beam.backward = 0
-        beam.ssnp(1, n, track=True)
-        beam.ssnp(-len(n) / 2, track=True)
-        beam.a_mul(pupil, track=True)
-        loss = beam.forward_mse_loss(mea[num], track=True)
+        with beam.track():
+            beam.ssnp(1, n)
+            beam.ssnp(-len(n) / 2)
+            beam.a_mul(pupil)
+            loss = beam.forward_mse_loss(mea[num])
         print(f"dir {num}, loss = {loss}")
         beam.n_grad(ng)
         ng *= 0.005

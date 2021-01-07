@@ -43,10 +43,11 @@ for step in range(5):
     # ng_total *= 0
     beam.forward = beam_in.forward
     beam.backward = 0
-    beam.ssnp(1, n, track=True)
-    beam.ssnp(-len(n) / 2, track=True)
-    beam.a_mul(pupil, track=True)
-    loss = beam.forward_mse_loss(mea, track=True)
+    with beam.track():
+        beam.ssnp(1, n)
+        beam.ssnp(-len(n) / 2)
+        beam.a_mul(pupil)
+        loss = beam.forward_mse_loss(mea)
     print(f"{loss = :f}")
     loss = [calc.reduce_mse(beam.forward[i], mea[i]) for i in range(8)]
     print(f"loss detail: {', '.join([f'{i:6.1f}' for i in loss])}")

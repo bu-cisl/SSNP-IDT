@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 from pycuda.gpuarray import GPUArray
 from pycuda.driver import Stream
 from typing import Literal, Optional, List, Union
@@ -20,6 +22,7 @@ class BeamArray:
     BACKWARD = 1
     relation: Literal[0, 1]
     _config: Optional[Config]
+    _track: bool
     config: Union[Config, property]
     _get_array_times: int
     _u1: GPUArray
@@ -45,6 +48,9 @@ class BeamArray:
     def bpm(self, dz, n: GPUArray = None, *, track: bool = False): ...
 
     def forward_mse_loss(self, measurement: GPUArray, *, track: bool = False): ...
+
+    @contextmanager
+    def track(self): ...
 
     def n_grad(self, output: GPUArray = None) -> GPUArray: ...
 

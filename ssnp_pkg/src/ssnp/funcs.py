@@ -422,20 +422,20 @@ class BPMFuncs(Funcs):
                     temp = make_cuDoubleComplex(cos(ni * {phase_factor}), sin(ni * {phase_factor}));
                     u[i] = cuCmul(u[i], temp);
                 """,
-                loop_prep="double2 temp, double ni",
+                loop_prep="double2 temp; double ni",
                 preamble='#include "cuComplex.h"'
             )
             q_op_g = elementwise.ElementwiseKernel(
                 "double2 *u, double *n_, double2 *ug, double *n_g",
                 # Forward: u=u*temp
                 f"""
-                    temp = n_[i % (n / {self.batch})];
-                    temp_conj = make_cuDoubleComplex(cos(temp * {phase_factor}), -sin(temp * {phase_factor}));
+                    ni = n_[i % (n / {self.batch})];
+                    temp_conj = make_cuDoubleComplex(cos(ni * {phase_factor}), -sin(ni * {phase_factor}));
                     n_g[i] = {phase_factor} * 
                         (cuCimag(ug[i]) * cuCreal(u[i]) - cuCimag(u[i]) * cuCreal(ug[i]));
                     ug[i] = cuCmul(ug[i], temp_conj);
                 """,
-                loop_prep="double2 temp_conj",
+                loop_prep="double2 temp_conj; double ni",
                 preamble='#include "cuComplex.h"'
             )
             new_prop = {"P": p_mat, "Pg": p_mat.conj(), "Q": q_op, "Qg": q_op_g}

@@ -49,11 +49,12 @@ for step in range(15):
     for num in range(8):
         beam.forward = u_list[num]
         beam.backward = 0
-        beam.ssnp(1, s, track=True)
-        beam.ssnp(-len(s) / 2, track=True)
-        beam.a_mul(pupil, track=True)
-        # beam.relation = BeamArray.BACKWARD
-        loss = beam.forward_mse_loss(mea[num], track=True)
+        with beam.track():
+            beam.ssnp(1, s)
+            beam.ssnp(-len(s) / 2)
+            beam.a_mul(pupil)
+            # beam.relation = BeamArray.BACKWARD
+            loss = beam.forward_mse_loss(mea[num])
         print(f"dir {num}, loss = {loss}")
         sum_grad += beam.n_grad(grad)
     sum_grad *= gamma

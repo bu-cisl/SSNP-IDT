@@ -6,6 +6,7 @@ import copy
 from collections import Iterable
 from numbers import Number
 import numpy as np
+from contextlib import contextmanager
 from pycuda import gpuarray
 from pycuda.gpuarray import GPUArray
 from ssnp import calc
@@ -25,6 +26,7 @@ class BeamArray:
     DERIVATIVE = 0
     BACKWARD = 1
     _config = None
+    _track = False
 
     def __init__(self, u1, u2=None, relation=BACKWARD, total_ops=0, stream=None):
         def to_gpu(u, name):
@@ -199,7 +201,7 @@ class BeamArray:
                 self.relation = BeamArray.DERIVATIVE
             self._u_setter(self._u2, value)
 
-    def ssnp(self, dz, n=None, *, track=False):
+    def ssnp(self, dz, n=None, *, track=None):
         """
         Perform an SSNP operation for this beam array
 
@@ -207,13 +209,15 @@ class BeamArray:
         :param n: refractive index, default is background n0
         :param track: track this operation for gradient calculation
         """
+        if track is None:
+            track = self._track
         if self._u2 is None:
             warn("incomplete field information, assuming u is pure forward")
             self.backward = 0
         self.merge_prop()
         self._parse(('ssnp', self._u1, self._u2), dz, n, track)
 
-    def bpm(self, dz, n=None, *, track=False):  # todo: untested
+    def bpm(self, dz, n=None, *, track=None):
         """
         Perform a BPM operation for this beam array
 
@@ -221,6 +225,9 @@ class BeamArray:
         :param n: refractive index, default is background n0
         :param track: track this operation for gradient calculation
         """
+        if track is None:
+            track = self._track
+
         if self._u2 is not None:
             warn("discarding backward propagation part of bidirectional field", stacklevel=2)
             self.backward = None
@@ -336,7 +343,7 @@ class BeamArray:
     def binary_pupil(self, na):
         self.a_mul(self.multiplier.binary_pupil(na, gpu=True))
 
-    def mul(self, arr, *, hold=None, track=False):
+    def mul(self, arr, *, hold=None, track=None):
         """
         calculate ``beam *= arr``
 
@@ -346,6 +353,8 @@ class BeamArray:
         :param hold: some part not perform multiply
         :param track: track this operation for gradient calculation
         """
+        if track is None:
+            track = self._track
         param_check(field=self._u1, multiplier=arr, hold=hold and hold._u1)
         if hold is not None:
             self.__isub__(hold)
@@ -356,10 +365,12 @@ class BeamArray:
             if track:
                 self._tape.append(("u*", arr))
 
-    def a_mul(self, arr, hold=None, track=False):
+    def a_mul(self, arr, hold=None, track=None):
+        if track is None:
+            track = self._track
         fourier = self._fft_funcs.fourier
         if self.batch == 1:
-            param_check(angular_spectrum=self._u1, multiplier=arr, hold=None if hold is None else hold._u1)
+            param_check(angular_spectrum=self._u1, multiplier=arr, hold=hold and hold._u1)
         else:
             param_check(angular_spectrum=self._u1[0], multiplier=arr)
         if hold is not None:
@@ -415,7 +426,9 @@ class BeamArray:
     def __isub__(self, other):
         return BeamArray._iadd_isub(self, other, add=False)
 
-    def forward_mse_loss(self, measurement, *, track=False):
+    def forward_mse_loss(self, measurement, *, track=None):
+        if track is None:
+            track = self._track
         if track:
             self._tape.append(("mse", measurement))
         return calc.reduce_mse(self.forward, measurement)
@@ -496,3 +509,12 @@ class BeamArray:
             data = f"{{complex field U:\n{self._u1}}}"
 
         return f"{{size: {self.shape},\nbeam type: {beam_type},\ndata: {data}\n}}"
+
+    @contextmanager
+    def track(self):
+        if self._track:
+            warn("this BeamArray is already tracked")
+        else:
+            self._track = True
+        yield
+        self._track = False
