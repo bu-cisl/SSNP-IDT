@@ -111,7 +111,7 @@ class Config:
 
     def register_updater(self, updater):
         if updater is not None:
-            assert hasattr(updater, "__call__"), "updater function is not callable"
+            assert callable(updater), "updater function is not callable"
             self._callbacks.append(updater)
 
     def clear_updater(self):

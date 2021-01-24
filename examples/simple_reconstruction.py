@@ -6,9 +6,13 @@ import pycuda.compiler
 from pycuda import gpuarray
 
 if platform.system() == 'Windows':
-    os.environ['PATH'] += r";C:\Program Files (x86)\Microsoft Visual Studio\2019\Community" \
-                          r"\VC\Tools\MSVC\14.25.28610\bin\Hostx64\x64"
+    # eliminate "non-UTF8 char" warnings
     pycuda.compiler.DEFAULT_NVCC_FLAGS = ['-Xcompiler', '/wd 4819']
+    # remove code below if you have valid C compiler in `PATH` already
+    import glob
+    CL_PATH = max(glob.glob(r"C:\Program Files (x86)\Microsoft Visual Studio"
+                            r"\*\*\VC\Tools\MSVC\*\bin\Hostx64\x64\cl.exe"))
+    os.environ['PATH'] += ";" + CL_PATH[:-7]
 
 import ssnp
 from ssnp import BeamArray
