@@ -1,4 +1,4 @@
-from typing import Tuple, Literal, Union
+from typing import Tuple, Literal, Union, Optional, Sequence
 from pycuda.driver import Stream
 from ssnp.funcs import BPMFuncs, SSNPFuncs, Funcs
 from pycuda.gpuarray import GPUArray
@@ -8,7 +8,8 @@ from numbers import Real
 from ssnp.utils import Config
 
 
-def ssnp_step(u: GPUArray, u_d: GPUArray, dz: Real, n: GPUArray = None, output: GPUArray = None,
+def ssnp_step(u: GPUArray, u_d: GPUArray, dz: Real, n: GPUArray = None,
+              output: Sequence[Optional[GPUArray], Optional[GPUArray]] = None,
               config: Config = None, stream: Stream = None) -> Tuple[GPUArray, GPUArray]: ...
 
 
@@ -41,7 +42,7 @@ def sum_batch(u: GPUArray, output: GPUArray = None, stream: Stream = None): ...
 def get_multiplier(shape, res=None, stream: Stream = None): ...
 
 
-def u_mul(u: GPUArray, mul, copy: bool = False, stream: Stream = None, conj: bool = False) -> GPUArray: ...
+def u_mul(u: GPUArray, mul, copy: bool = False, out=None, stream: Stream = None, conj: bool = False) -> GPUArray: ...
 
 
 def merge_prop(uf: GPUArray, ub: GPUArray, config: Config = None,

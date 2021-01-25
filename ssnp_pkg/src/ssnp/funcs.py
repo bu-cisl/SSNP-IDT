@@ -6,6 +6,7 @@ from ssnp.utils import Multipliers, get_stream_in_current
 from contextlib import contextmanager
 from functools import partial, lru_cache
 from skcuda import fft as skfft
+import logging
 
 
 class Funcs:
@@ -47,15 +48,18 @@ class Funcs:
                 preamble='#include "cuComplex.h"'
             )
 
-        shape = tuple(arr_like.shape)
-        key = (shape, res, stream, fft_type)
+        if res is not None:
+            res = tuple(round(res_i * 1e12) for res_i in res)
+        if n0 is not None:
+            n0 = round(n0 * 1e12)
+        key = (tuple(arr_like.shape), arr_like.dtype, res, n0, stream, fft_type)
         try:
             return cls._funcs_cache[key]
         except KeyError:
             cls._funcs_cache[key] = super().__new__(cls)
             return cls._funcs_cache[key]
 
-    def __init__(self, arr_like, res, n0, stream=None, fft_type="reikna"):
+    def __init__(self, arr_like, res, n0, stream=None, fft_type="skcuda"):
         if self._initialized():
             return
         self._funcs_cache = None  # only used for mark `self` as initialized
@@ -64,29 +68,33 @@ class Funcs:
             stream = get_stream_in_current()
         self.stream = stream
 
-        # FFTs
         shape = tuple(arr_like.shape)
-        if fft_type == "reikna":
-            if len(shape) != 2:
-                raise NotImplementedError(f"cannot process {len(shape)}-D data with reikna")
-            self._fft_callable = self._compile_fft(arr_like.shape, arr_like.dtype, stream)
-            self.fft = self._fft_reikna
+        if len(shape) == 3:
+            batch = shape[0]
+            shape = shape[1:]
+        elif len(shape) == 2:
             batch = 1
+        else:
+            raise NotImplementedError(f"cannot process {len(shape)}-D data")
+        self.shape = shape
+        self.batch = batch
+
+        if fft_type == "reikna":
+            def _fft(arr, o, inv):
+                nonlocal fft_callable
+                if fft_callable is None:
+                    logging.debug(f"assigning reikna fft_callable in an instance of {type(self)}")
+                    fft_callable = self._compile_reikna_fft(arr_like.shape, arr_like.dtype, stream)
+                fft_callable(o, arr, inverse=inv)
+
+            fft_callable = None
+            self._fft = _fft
         elif fft_type == "skcuda":
-            if len(shape) == 3:
-                batch = shape[0]
-                shape = shape[1:]
-            else:
-                batch = 1
-            if len(shape) != 2:
-                raise NotImplementedError(f"cannot process {len(shape)}-D data with skcuda")
             self._skfft_plan = skfft.Plan(shape, np.complex128, np.complex128, batch, stream)
-            self.fft = self._fft_sk
+            self._fft = self._fft_sk
         else:
             raise ValueError(f"Unknown FFT type {fft_type}")
         self.ifft = partial(self.fft, inverse=True)
-        self.shape = shape
-        self.batch = batch
 
         # kz and related multipliers
         if type(self) is not Funcs:
@@ -180,38 +188,35 @@ class Funcs:
 
     @staticmethod
     @lru_cache
-    def _compile_fft(shape, dtype, stream):
+    def _compile_reikna_fft(shape, dtype, stream):
         from reikna.fft import FFT
         import reikna.cluda as cluda
+        logging.info(f"compiling reikna fft: {shape=}, {dtype=}")
         thr = cluda.cuda_api().Thread(stream)
         arr_like = type("", (), {})()
         arr_like.shape = shape
         arr_like.dtype = dtype
-        return FFT(arr_like).compile(thr)
+        axes = None
+        if len(arr_like.shape) == 3:
+            axes = (1, 2)
+        return FFT(arr_like, axes=axes).compile(thr)
 
-    def _fft_reikna(self, arr, output=None, copy=False, inverse=False):
+    def fft(self, arr, output=None, copy=False, inverse=False):
         if output is not None:
             o = output
         elif copy:
             o = gpuarray.empty_like(arr)
         else:
             o = arr
-        self._fft_callable(o, arr, inverse=inverse)
+        self._fft(arr, o, inverse)
         return o
 
-    def _fft_sk(self, arr, *, output=None, copy=False, inverse=False):
-        if output is not None:
-            o = output
-        elif copy:
-            o = gpuarray.empty_like(arr)
-        else:
-            o = arr
+    def _fft_sk(self, arr, out, inverse):
         fft = skfft.ifft if inverse else skfft.fft
-        fft(arr, o, self._skfft_plan)
+        fft(arr, out, self._skfft_plan)
         if inverse:
             scale = 1 / self.shape[-1] / self.shape[-2]
-            o._axpbz(scale, 0, o, stream=self.stream)
-        return o
+            out._axpbz(scale, 0, out, stream=self.stream)
 
     @contextmanager
     def fourier(self, arr, copy=False):

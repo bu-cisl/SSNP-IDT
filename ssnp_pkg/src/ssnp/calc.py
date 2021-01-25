@@ -18,14 +18,16 @@ def ssnp_step(u, u_d, dz, n=None, output=None, config=None, stream=None):
     :param stream:
     :return: new (u, u_d) after a step towards +z direction
     """
+    if output is None:
+        output = (None, None)
     if len(u.shape) == 3:
-        param_check(u_batch=u, u_d_batch=u_d, output_batch=output)
+        param_check(u_batch=u, u_d_batch=u_d, u_output_batch=output[0], ud_output_batch=output[1])
         param_check(u=u[0], n=n)
     else:
-        param_check(u=u, u_d=u_d, n=n, output=output)
+        param_check(u=u, u_d=u_d, n=n, u_output=output[0], ud_output=output[1])
     funcs: SSNPFuncs = get_funcs(u, config, model="ssnp", stream=stream)
-    a = funcs.fft(u, output=output)
-    a_d = funcs.fft(u_d, output=output)
+    a = funcs.fft(u, output=output[0])
+    a_d = funcs.fft(u_d, output=output[1])
     funcs.diffract(a, a_d, dz)
     u = funcs.ifft(a)
     u_d = funcs.ifft(a_d)
@@ -134,12 +136,15 @@ def get_multiplier(shape, res=None, stream=None):
     return Multipliers(shape, res, stream)
 
 
-def u_mul(u, mul, copy=False, stream=None, conj=False):
+def u_mul(u, mul, copy=False, out=None, stream=None, conj=False):
     funcs = get_funcs(u, model="any", stream=stream)
-    if copy:
-        out = gpuarray.empty_like(u)
+    if out is None:
+        if copy:
+            out = gpuarray.empty_like(u)
+        else:
+            out = u
     else:
-        out = u
+        param_check(u=u, out=out)
 
     if isinstance(mul, Number):
         if conj:
