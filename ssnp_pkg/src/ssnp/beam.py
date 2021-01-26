@@ -1,6 +1,7 @@
 """
 Module for BeamArray class
 """
+from functools import partial
 from warnings import warn
 import copy
 from collections import Iterable
@@ -11,6 +12,7 @@ from pycuda import gpuarray
 from pycuda.gpuarray import GPUArray
 from ssnp import calc
 from ssnp.utils import param_check, Config
+from ssnp.utils.auto_gradient import Variable as Var, Operation, OperationTape, DataMissing
 import logging
 
 
@@ -58,6 +60,7 @@ class BeamArray:
         else:
             self._u2 = None
         self._tape = []
+        self._tape_new = OperationTape(total_ops)
         self._array_pool = []
         self.shape = shape[-2:]
         # self.multiplier = calc.get_multiplier(shape, stream=stream)
@@ -118,6 +121,15 @@ class BeamArray:
         if self.relation == BeamArray.DERIVATIVE:
             calc.split_prop(self._u1, self._u2, self._config, stream=self.stream)
             self.relation = BeamArray.BACKWARD
+        if self._track:
+            # def forward(u, u_d):
+            #     uf, ub = Var(), Var()
+            #     uf.data, ub.data = calc.split_prop(u.data, u_d.data, self._config,
+            #                                        copy=True, stream=self.stream)
+            #     return uf, ub
+            op = Operation([Var(), Var()], [Var(), Var()])
+            op.gradient = partial(calc.merge_grad, config=self._config, stream=self.stream)
+            self._tape_new.append(op)
 
     def merge_prop(self):
         if self._u2 is None:
@@ -126,6 +138,8 @@ class BeamArray:
         if self.relation == BeamArray.BACKWARD:
             calc.merge_prop(self._u1, self._u2, self._config, stream=self.stream)
             self.relation = BeamArray.DERIVATIVE
+        if self._track:
+            warn("cannot track 'merge_prop' operation (not implemented)")
 
     @property
     def forward(self):
@@ -340,6 +354,9 @@ class BeamArray:
         self.ops_number["remainder"] = self.ops_number["current"] = self.ops_number["max"]
         return output
 
+    def n_grad2(self, output=None):
+        pass
+
     def binary_pupil(self, na):
         self.a_mul(self.multiplier.binary_pupil(na, gpu=True))
 
@@ -379,59 +396,68 @@ class BeamArray:
             self.__iadd__(hold)
         else:
             with fourier(self._u1):
-                calc.u_mul(self._u1, arr)
+                calc.u_mul(self._u1, arr, stream=self.stream)
             if self._u2 is not None:
                 with fourier(self._u2):
-                    calc.u_mul(self._u2, arr)
+                    calc.u_mul(self._u2, arr, stream=self.stream)
             if track:
                 self._tape.append(("a*", arr))
+                self._tape_new.append(self._a_mul_op(arr))
 
-    def __imul__(self, other):  # todo: move to calc
+    def __imul__(self, other):
         calc.u_mul(self._u1, other, stream=self.stream)
         if self._u2 is not None:
             calc.u_mul(self._u2, other, stream=self.stream)
+        if self._track:
+            if self._u2 is None:
+                op = Operation(Var(), Var(), "mul")
+            else:
+                op = Operation((Var(), Var()), (Var(), Var()), "mul2")
+            forward = lambda *u_vars: [
+                Var(data=calc.u_mul(var.data, other,
+                                    out=self._get_array() if var.bound else None,
+                                    stream=self.stream))
+                for var in u_vars]
+            gradient = lambda *ug: [calc.u_mul(i, other, stream=self.stream, conj=True) for i in ug]
+            op.set_funcs(forward, gradient)
+            self._tape_new.append(op)
         return self
 
-    @staticmethod
-    def _iadd_isub(self, other, add):  # todo async
+    def __iadd__(self, other, sign=1):
         assert isinstance(other, BeamArray)
         param_check(self=self._u1, add=other._u1)
-        if self._u2 is None:
-            if other._u2 is None:
-                if add:
-                    self._u1 += other._u1
-                else:
-                    self._u1 -= other._u1
+        u_self = (self._u1,) if self._u2 is None else (self._u1, self._u2)
+        u_other = (other._u1,) if other._u2 is None else (other._u1, other._u2)
+        if len(u_self) != len(u_other):
+            raise ValueError("incompatible BeamArray type")
+        if self._u2 is not None:  # if u1 & u2, relation must be the same
+            if self.relation == BeamArray.DERIVATIVE:
+                other.merge_prop()
             else:
-                raise ValueError("incompatible BeamArray type")
-        else:
-            if other._u2 is None:
-                raise ValueError("incompatible BeamArray type")
-            else:
-                if self.relation == BeamArray.DERIVATIVE:
-                    other.merge_prop()
-                else:
-                    other.split_prop()
-                if add:
-                    self._u1 += other._u1
-                    self._u2 += other._u2
-                else:
-                    self._u1 -= other._u1
-                    self._u2 -= other._u2
+                other.split_prop()
+        # Main part: u_s = u_s * 1 + u_o * (sub?-1:1)
+        for u_s, u_o in zip(u_self, u_other):
+            u_s._axpbyz(1, u_o, sign, u_s, stream=self.stream)
         return self
 
-    def __iadd__(self, other):
-        return BeamArray._iadd_isub(self, other, add=True)
-
     def __isub__(self, other):
-        return BeamArray._iadd_isub(self, other, add=False)
+        return type(self).__iadd__(self, other, -1)
 
-    def forward_mse_loss(self, measurement, *, track=None):
-        if track is None:
-            track = self._track
-        if track:
+    def forward_mse_loss(self, measurement):
+        loss = calc.reduce_mse(self.forward, measurement)
+        if self._track:
             self._tape.append(("mse", measurement))
-        return calc.reduce_mse(self.forward, measurement)
+            ufg = calc.reduce_mse_grad(self._u1, measurement, self._get_array(), self.stream)
+            if self._u2 is None:
+                op = Operation(Var(), [], "mse")
+                op.gradient = lambda: ufg
+            else:
+                op = Operation([Var(), Var()], [], "mse")
+                ubg = self._get_array()
+                ubg.fill(0, self.stream)
+                op.gradient = lambda: ufg, ubg
+            self._tape_new.append(op)
+        return loss
 
     def _parse(self, info, dz, n, track):
         def step(var_dz, var_n):
@@ -451,6 +477,14 @@ class BeamArray:
                             self.ops_number["current"] += 1
                             u_save = None
                     self._tape.append(['bpm', u_save, var_dz, var_n])
+                    # new tape
+                    if var_n is not None and next(self._tape_new.save_hint):
+                        u_save = self._get_array()
+                        u_save.set(info[1])
+                    else:
+                        u_save = None
+                    self._tape_new.append(self._bpm_op(Var('u', u_save), var_n, dz))
+
             elif info[0] == 'ssnp':
                 calc.ssnp_step(info[1], info[2], var_dz, var_n, config=self._config)
                 if track:
@@ -463,6 +497,13 @@ class BeamArray:
                     # ud_save.set(info[2])
                     ud_save = None
                     self._tape.append(('ssnp', u_save, ud_save, var_dz, var_n))
+                    # new tape
+                    if var_n is not None and next(self._tape_new.save_hint):
+                        u_save = self._get_array()
+                        u_save.set(info[1])
+                    else:
+                        u_save = None
+                    self._tape_new.append(self._bpm_op(Var('u', u_save), var_n, dz))
 
         if n is None:
             if isinstance(dz, Iterable):
@@ -518,3 +559,90 @@ class BeamArray:
             self._track = True
         yield
         self._track = False
+
+    def _a_mul_op(self, other):
+        if self._u2 is None:
+            op = Operation(Var(), Var(), "a_mul")
+        else:
+            op = Operation((Var(), Var()), (Var(), Var()), "a_mul2")
+
+        def gradient(*ug_list):
+            for ug in ug_list:
+                with self._fft_funcs.fourier(ug) as ag:
+                    calc.u_mul(ag, other, stream=self.stream, conj=True)
+            return ug_list
+
+        op.set_funcs(None, gradient)
+        return op
+
+    def _bpm_op(self, u_out, n_data, dz):
+        vars_in = Var('u_in') if n_data is None else (Var('u_in'), Var('n', n_data, external=True))
+
+        def gradient(ug_in_data, out: dict = None):
+            if n_data:
+                if not u_out:
+                    raise DataMissing
+                ng_data = out and out.get('n', None) or gpuarray.empty_like(n_data)
+            else:
+                ng_data = None
+            calc.bpm_grad_bp(u_out.data, ug_in_data, dz, n_data, ng_data, self._config, self.stream)
+            return ug_in_data if ng_data is None else (ug_in_data, ng_data)
+
+        def forward(u_in: Var):
+            if n_data:
+                if u_in.bound:
+                    u_out.data = self._get_array()
+                else:
+                    u_out.data = u_in.data
+                u_return = u_out
+            else:
+                if u_in.bound:
+                    u_return = Var(u_in.tag, self._get_array())
+                else:
+                    u_return = u_in
+            calc.bpm_step(u_in.data, dz, n_data, u_return.data, self._config, self.stream)
+            return u_return
+
+        def clear():
+            if u_out:
+                self.recycle_array(u_out.data)
+
+        op = Operation(vars_in, u_out, "bpm")
+        op.set_funcs(forward, gradient, clear)
+        return op
+
+    def _ssnp_op(self, u_out, n_data, dz):
+        def gradient(ug_in_data, u_dg_in_data, out: dict = None):
+            if n_data:
+                if not u_out[0]:
+                    raise DataMissing
+                ng_data = out and out.get('n', None) or gpuarray.empty_like(n_data)
+            else:
+                ng_data = None
+            calc.ssnp_grad_bp(u_out[0].data, ug_in_data, u_dg_in_data, dz, n_data, ng_data,
+                              config=self._config, stream=self.stream)
+            return ug_in_data if ng_data is None else (ug_in_data, ng_data)
+
+        def forward(*u_in):
+            if n_data:  # scatter: save in u_out, can reuse mem if not bound
+                for i, ui in enumerate(u_in):
+                    u_out[i].data = self._get_array() if ui.bound else ui.data
+                u_return = u_out
+            else:  # no scatter: not save in u_out, create new unbound if ui is bound
+                u_return = [None, None]
+                for i, ui in enumerate(u_in):
+                    u_return[i] = Var(ui.tag, self._get_array()) if ui.bound else ui
+            calc.ssnp_step(u_in[0].data, u_in[1].data, dz, n_data,
+                           output=[u_return[0].data, u_return[1].data],
+                           config=self._config, stream=self.stream)
+            return u_return
+
+        def clear():
+            for v in u_out:
+                if v:
+                    self.recycle_array(v.data)
+
+        vars_in = Var('u_in') if n_data is None else (Var('u_in'), Var('n', n_data, external=True))
+        op = Operation(vars_in, u_out, "ssnp")
+        op.set_funcs(forward, gradient, clear)
+        return op

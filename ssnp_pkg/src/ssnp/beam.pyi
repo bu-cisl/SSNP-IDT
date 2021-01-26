@@ -6,9 +6,11 @@ from typing import Literal, Optional, List, Union
 import numpy as np
 from ssnp.utils import Multipliers, Config
 from ssnp.funcs import Funcs
+from ssnp.utils.auto_gradient import OperationTape, Variable
 
 G_PRO = Union[GPUArray, property]
 ARR = Union[GPUArray, np.ndarray]
+
 
 class TrackStack:
     def __init__(self, u_num, shape): ...
@@ -34,6 +36,7 @@ class BeamArray:
     multiplier: Multipliers
     _array_pool: List[GPUArray, ...]
     _tape: list
+    _tape_new: OperationTape
     ops_number: dict
     _fft_funcs: Funcs
     batch: int
@@ -47,7 +50,7 @@ class BeamArray:
 
     def bpm(self, dz, n: GPUArray = None, *, track: bool = False): ...
 
-    def forward_mse_loss(self, measurement: GPUArray, *, track: bool = False): ...
+    def forward_mse_loss(self, measurement: GPUArray): ...
 
     @contextmanager
     def track(self): ...
@@ -62,10 +65,10 @@ class BeamArray:
 
     def __imul__(self, other): ...
 
-    @staticmethod
-    def _iadd_isub(self: BeamArray, other: BeamArray, add: bool): ...
+    # @staticmethod
+    # def _iadd_isub(self: BeamArray, other: BeamArray, add: bool): ...
 
-    def __iadd__(self, other: BeamArray): ...
+    def __iadd__(self, other: BeamArray, sign=1): ...
 
     def __isub__(self, other: BeamArray): ...
 
@@ -79,3 +82,8 @@ class BeamArray:
 
     @staticmethod
     def _u_setter(u: GPUArray, value, dtype=dtype): ...
+
+    def _a_mul_op(self, other): ...
+
+    def _bpm_op(self, u_out: Variable, n_data, dz): ...
+
