@@ -66,8 +66,6 @@ class BeamArray:
         # self.multiplier = calc.get_multiplier(shape, stream=stream)
         self._get_array_times = 0
 
-        max_ops = int(np.sqrt(2 * total_ops)) + 1 if total_ops > 0 else 0
-        self.ops_number = {"max": max_ops, "remainder": max_ops, "current": max_ops}
         self._fft_funcs = calc.get_funcs(self._u1, stream=stream)
         self.stream = stream
 
@@ -110,9 +108,12 @@ class BeamArray:
             return gpuarray.empty_like(self._u1)
 
     def recycle_array(self, arr):
-        param_check(beam=self._u1, recycle=arr)
-        assert arr.dtype == self.dtype
-        self._array_pool.append(arr)
+        try:
+            param_check(beam=self._u1, recycle=arr)
+            assert arr.dtype == self.dtype
+            self._array_pool.append(arr)
+        except:
+            warn("given array is incompatible and not recycled", stacklevel=2)
 
     def split_prop(self):
         if self._u2 is None:
@@ -351,7 +352,6 @@ class BeamArray:
             self.recycle_array(ug)
         if u_dg is not None:
             self.recycle_array(u_dg)
-        self.ops_number["remainder"] = self.ops_number["current"] = self.ops_number["max"]
         return output
 
     def n_grad2(self, output=None):
@@ -464,26 +464,23 @@ class BeamArray:
             if info[0] == 'bpm':
                 calc.bpm_step(info[1], var_dz, var_n, config=self._config)
                 if track:
-                    if var_n is None:
-                        u_save = None
-                    else:
-                        if self.ops_number["current"] >= self.ops_number["remainder"]:
-                            u_save = self._get_array()
-                            u_save.set(info[1])
-                            if self.ops_number["remainder"] > 0:
-                                self.ops_number["remainder"] -= 1
-                                self.ops_number["current"] = 0
-                        else:
-                            self.ops_number["current"] += 1
-                            u_save = None
-                    self._tape.append(['bpm', u_save, var_dz, var_n])
                     # new tape
-                    if var_n is not None and next(self._tape_new.save_hint):
+                    if var_n is not None and (old_save := next(self._tape_new.save_hint)):
                         u_save = self._get_array()
                         u_save.set(info[1])
                     else:
                         u_save = None
                     self._tape_new.append(self._bpm_op(Var('u', u_save), var_n, dz))
+                    # old tape
+                    if var_n is None:
+                        u_save = None
+                    else:
+                        if old_save:
+                            u_save = self._get_array()
+                            u_save.set(info[1])
+                        else:
+                            u_save = None
+                    self._tape.append(['bpm', u_save, var_dz, var_n])
 
             elif info[0] == 'ssnp':
                 calc.ssnp_step(info[1], info[2], var_dz, var_n, config=self._config)
@@ -557,6 +554,11 @@ class BeamArray:
             warn("this BeamArray is already tracked")
         else:
             self._track = True
+        if not self._tape_new:
+            v_out = [Var("u1_in")]
+            if self._u2 is not None:
+                v_out.append(Var("u2_in"))
+            self._tape_new.append(self._change_op((), v_out))
         yield
         self._track = False
 
@@ -582,7 +584,11 @@ class BeamArray:
             if n_data:
                 if not u_out:
                     raise DataMissing
-                ng_data = out and out.get('n', None) or gpuarray.empty_like(n_data)
+                if out and out.get('n', None) is not None:
+                    ng_data = out['n']
+                else:
+                    logging.info("allocate memory for ng")
+                    ng_data = gpuarray.empty_like(n_data)
             else:
                 ng_data = None
             calc.bpm_grad_bp(u_out.data, ug_in_data, dz, n_data, ng_data, self._config, self.stream)
@@ -616,7 +622,11 @@ class BeamArray:
             if n_data:
                 if not u_out[0]:
                     raise DataMissing
-                ng_data = out and out.get('n', None) or gpuarray.empty_like(n_data)
+                if out and out.get('n', None) is not None:
+                    ng_data = out['n']
+                else:
+                    logging.info("allocate memory for ng")
+                    ng_data = gpuarray.empty_like(n_data)
             else:
                 ng_data = None
             calc.ssnp_grad_bp(u_out[0].data, ug_in_data, u_dg_in_data, dz, n_data, ng_data,
@@ -644,5 +654,27 @@ class BeamArray:
 
         vars_in = Var('u_in') if n_data is None else (Var('u_in'), Var('n', n_data, external=True))
         op = Operation(vars_in, u_out, "ssnp")
+        op.set_funcs(forward, gradient, clear)
+        return op
+
+    def _change_op(self, vars_in, vars_out):
+        def gradient(*arr_in):
+            for arr in arr_in[li:]:
+                self.recycle_array(arr)
+            return arr_in[:li] + tuple(self._get_array().fill(0) for _ in range(li - lo))
+
+        def forward(*v_in):
+            for v in v_in[lo:]:
+                if not v.bound:
+                    self.recycle_array(v.data)
+            return v_in[:lo] + tuple(vars_out[li:])
+
+        def clear():
+            for v in vars_out:
+                if v:
+                    self.recycle_array(v)
+
+        li, lo = len(vars_in), len(vars_out)
+        op = Operation(vars_in, vars_out, "change")
         op.set_funcs(forward, gradient, clear)
         return op

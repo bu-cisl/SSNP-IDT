@@ -72,6 +72,8 @@ class Operation:
                 else:
                     self.taped_out = None
                     return
+        if not self.taped_out:
+            self.taped_out = None
 
     def set_funcs(self, forward, gradient, clear=None):
         args = forward, gradient, clear
@@ -102,6 +104,9 @@ class Operation:
 class OperationTape:
     tape: List[Operation] = None
 
+    class Restart(Exception):
+        pass
+
     @staticmethod
     def arithmetic_sequence_save(total):
         if total <= 0:
@@ -109,14 +114,18 @@ class OperationTape:
                 yield True
         remainder = current = int(np.sqrt(2 * total + 0.25) - 0.5)
         while True:
-            if current >= remainder:
-                if remainder > 0:
-                    remainder -= 1
-                    current = 0
-                yield True
-            else:
-                current += 1
-                yield False
+            try:
+                if current >= remainder:
+                    if remainder > 0:
+                        remainder -= 1
+                        current = 0
+                    yield True
+                else:
+                    current += 1
+                    yield False
+            except OperationTape.Restart:
+                remainder = current = int(np.sqrt(2 * total + 0.25) - 0.5)
+                yield
 
     def __init__(self, size=None):
         self.tape = []
@@ -130,6 +139,8 @@ class OperationTape:
         self.tape.append(op)
 
     def collect_gradient(self, tags, clear=True, reverse=False):
+        if clear:  # reinitialize counter
+            self.save_hint.throw(OperationTape.Restart)
         if not tags:  # nothing to collect, just clear self if needed
             if clear:
                 for op in self.tape:
@@ -189,3 +200,12 @@ class OperationTape:
     def __repr__(self):
         content = ',\n  '.join(repr(o) for o in self.tape)
         return f"{self.__class__.__name__}([{content}])"
+
+    def __bool__(self):
+        return bool(self.tape)
+
+    def __len__(self):
+        return len(self.tape)
+
+    def __getitem__(self, item):
+        return self.tape[item]
