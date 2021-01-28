@@ -45,6 +45,7 @@ for step in range(5):
     for num in range(ANGLE_NUM):
         beam.forward = u_list[num]
         beam.backward = 0
+        beam.merge_prop()
         with beam.track():
             beam.ssnp(1, n)
             beam.ssnp(-len(n) / 2)

@@ -47,6 +47,7 @@ for step in range(5):
     # ng_total *= 0
     beam.forward = beam_in.forward
     beam.backward = 0
+    beam.merge_prop()
     with beam.track():
         beam.ssnp(1, n)
         beam.ssnp(-len(n) / 2)

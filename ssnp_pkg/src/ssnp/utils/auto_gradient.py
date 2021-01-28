@@ -48,9 +48,10 @@ class Operation:
         self.taped_len = tl
 
     def backprop(self, *grad_out_data, **kwargs):
-        # assert len(grad_in_data) == self.taped_len[0], "grad_in length error"
-        grad_in_data = self.gradient(*grad_out_data, **kwargs)
         # assert len(grad_out_data) == self.taped_len[1], "grad_out length error"
+        grad_in_data = self.gradient(*grad_out_data, **kwargs)
+        if len(grad_in_data) != len(self.vars_in):
+            raise ValueError(f"cannot match gradient in Operation('{self.name}') with vars_in numbers")
         return grad_in_data
 
     def recalculate(self, taped_in):
@@ -178,8 +179,6 @@ class OperationTape:
                     raise ValueError("recalculation failed in partial-saved backpropagation") from e
 
             taped_grad = []
-            if not isinstance(grad_in_data, Iterable) and len(op.vars_in) == 1:
-                grad_in_data = [grad_in_data]
             for data, v in zip(grad_in_data, op.vars_in):
                 if not v.external:
                     taped_grad.append(data)

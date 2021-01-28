@@ -118,29 +118,22 @@ class BeamArray:
     def split_prop(self):
         if self._u2 is None:
             warn("split_prop for forward-only beam is useless")
-            return
-        if self.relation == BeamArray.DERIVATIVE:
+        elif self.relation == BeamArray.DERIVATIVE:
             calc.split_prop(self._u1, self._u2, self._config, stream=self.stream)
             self.relation = BeamArray.BACKWARD
-        if self._track:
-            # def forward(u, u_d):
-            #     uf, ub = Var(), Var()
-            #     uf.data, ub.data = calc.split_prop(u.data, u_d.data, self._config,
-            #                                        copy=True, stream=self.stream)
-            #     return uf, ub
-            op = Operation([Var(), Var()], [Var(), Var()])
-            op.gradient = partial(calc.merge_grad, config=self._config, stream=self.stream)
-            self._tape_new.append(op)
+            if self._track:
+                op = Operation([Var(), Var()], [Var(), Var()])
+                op.gradient = partial(calc.merge_grad, config=self._config, stream=self.stream)
+                self._tape_new.append(op)
 
     def merge_prop(self):
         if self._u2 is None:
             warn("merge_prop for forward-only beam is useless")
-            return
-        if self.relation == BeamArray.BACKWARD:
+        elif self.relation == BeamArray.BACKWARD:
             calc.merge_prop(self._u1, self._u2, self._config, stream=self.stream)
             self.relation = BeamArray.DERIVATIVE
-        if self._track:
-            warn("cannot track 'merge_prop' operation (not implemented)")
+            if self._track:
+                warn("cannot track 'merge_prop' operation (not implemented)")
 
     @property
     def forward(self):
@@ -450,12 +443,12 @@ class BeamArray:
             ufg = calc.reduce_mse_grad(self._u1, measurement, self._get_array(), self.stream)
             if self._u2 is None:
                 op = Operation(Var(), [], "mse")
-                op.gradient = lambda: ufg
+                op.gradient = lambda: (ufg,)
             else:
                 op = Operation([Var(), Var()], [], "mse")
                 ubg = self._get_array()
                 ubg.fill(0, self.stream)
-                op.gradient = lambda: ufg, ubg
+                op.gradient = lambda: (ufg, ubg)
             self._tape_new.append(op)
         return loss
 
@@ -477,7 +470,7 @@ class BeamArray:
                     else:
                         if old_save:
                             u_save = self._get_array()
-                            u_save.set(info[1])
+                            u_save.set_async(info[1], self.stream)
                         else:
                             u_save = None
                     self._tape.append(['bpm', u_save, var_dz, var_n])
@@ -497,10 +490,12 @@ class BeamArray:
                     # new tape
                     if var_n is not None and next(self._tape_new.save_hint):
                         u_save = self._get_array()
-                        u_save.set(info[1])
+                        ud_save = self._get_array()
+                        u_save.set_async(info[1], self.stream)
+                        ud_save.set_async(info[2], self.stream)
                     else:
-                        u_save = None
-                    self._tape_new.append(self._bpm_op(Var('u', u_save), var_n, dz))
+                        u_save = ud_save = None
+                    self._tape_new.append(self._ssnp_op((Var('u', u_save), Var('ud', ud_save)), var_n, dz))
 
         if n is None:
             if isinstance(dz, Iterable):
@@ -592,7 +587,7 @@ class BeamArray:
             else:
                 ng_data = None
             calc.bpm_grad_bp(u_out.data, ug_in_data, dz, n_data, ng_data, self._config, self.stream)
-            return ug_in_data if ng_data is None else (ug_in_data, ng_data)
+            return (ug_in_data,) if ng_data is None else (ug_in_data, ng_data)
 
         def forward(u_in: Var):
             if n_data:
@@ -631,7 +626,7 @@ class BeamArray:
                 ng_data = None
             calc.ssnp_grad_bp(u_out[0].data, ug_in_data, u_dg_in_data, dz, n_data, ng_data,
                               config=self._config, stream=self.stream)
-            return ug_in_data if ng_data is None else (ug_in_data, ng_data)
+            return (ug_in_data, u_dg_in_data) if ng_data is None else (ug_in_data, u_dg_in_data, ng_data)
 
         def forward(*u_in):
             if n_data:  # scatter: save in u_out, can reuse mem if not bound
@@ -652,7 +647,9 @@ class BeamArray:
                 if v:
                     self.recycle_array(v.data)
 
-        vars_in = Var('u_in') if n_data is None else (Var('u_in'), Var('n', n_data, external=True))
+        vars_in = [Var('u_in'), Var('ud_in')]
+        if n_data is not None:
+            vars_in.append(Var('n', n_data, external=True))
         op = Operation(vars_in, u_out, "ssnp")
         op.set_funcs(forward, gradient, clear)
         return op

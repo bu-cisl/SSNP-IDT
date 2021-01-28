@@ -2,7 +2,7 @@ from contextlib import contextmanager
 
 from pycuda.gpuarray import GPUArray
 from pycuda.driver import Stream
-from typing import Literal, Optional, List, Union
+from typing import Literal, Optional, List, Union, Tuple
 import numpy as np
 from ssnp.utils import Multipliers, Config
 from ssnp.funcs import Funcs
@@ -86,5 +86,7 @@ class BeamArray:
     def _a_mul_op(self, other): ...
 
     def _bpm_op(self, u_out: Variable, n_data, dz): ...
+
+    def _ssnp_op(self, u_out: Tuple[Variable, Variable], n_data, dz): ...
 
     def _change_op(self, vars_in, vars_out): ...
