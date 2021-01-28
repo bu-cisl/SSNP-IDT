@@ -12,12 +12,6 @@ G_PRO = Union[GPUArray, property]
 ARR = Union[GPUArray, np.ndarray]
 
 
-class TrackStack:
-    def __init__(self, u_num, shape): ...
-
-    def clear(self): ...
-
-
 class BeamArray:
     dtype = np.complex128
     DERIVATIVE = 0
@@ -35,8 +29,7 @@ class BeamArray:
     derivative: Optional[G_PRO]
     multiplier: Multipliers
     _array_pool: List[GPUArray, ...]
-    _tape: list
-    _tape_new: OperationTape
+    tape: OperationTape
     ops_number: dict
     _fft_funcs: Funcs
     batch: int
@@ -64,9 +57,6 @@ class BeamArray:
     def a_mul(self, arr: GPUArray, *, hold: BeamArray = None, track=False): ...
 
     def __imul__(self, other): ...
-
-    # @staticmethod
-    # def _iadd_isub(self: BeamArray, other: BeamArray, add: bool): ...
 
     def __iadd__(self, other: BeamArray, sign=1): ...
 
