@@ -362,17 +362,21 @@ class SSNPFuncs(Funcs):
                 name="ssnp_q"
             )
             q_op_g = elementwise.ElementwiseKernel(
-                "double2 *u, double *n_, double2 *ug, double2 *udg, double *n_g",
+                # note: put n as 1st param to get un-batched thread number
+                "double *n_, double2 *u, double2 *ug, double2 *udg, double *n_g",
                 # Forward: ud = ud - temp * u
                 # ng = Re{-udg * conj(u) * (d_temp(n) / d_n)}
                 f"""
-                    ni = n_[i % (n / {self.batch})];
-                    temp = {phase_factor} * ni * ({2 * n0} + ni);
-                    ug[i].x -= temp * udg[i].x;
-                    ug[i].y -= temp * udg[i].y;
-                    n_g[i] = -(udg[i].x * u[i].x + udg[i].y * u[i].y) * {phase_factor} * ({2 * n0} + 2 * ni)
+                    temp = {phase_factor} * n_[i] * ({2 * n0} + n_[i]);
+                    n_g[i] = 0;
+                    for (j = 0; j < {self.batch}; j++) {{
+                        ug[i + j * n].x -= temp * udg[i + j * n].x;
+                        ug[i + j * n].y -= temp * udg[i + j * n].y;
+                        n_g[i] -= (udg[i + j * n].x * u[i + j * n].x + udg[i + j * n].y * u[i + j * n].y) * 
+                            {phase_factor} * ({2 * n0} + 2 * n_[i]);
+                    }}
                 """,
-                loop_prep="double temp, ni",
+                loop_prep="double temp; unsigned j",
                 preamble='#include "cuComplex.h"',
                 name="ssnp_qg"
             )
@@ -390,7 +394,7 @@ class SSNPFuncs(Funcs):
         self._fused_mam_callable_krn(ag, a_dg, *self._get_prop(dz)["Pg"], stream=self.stream)
 
     def scatter_g(self, u, n, ug, u_dg, ng, dz):
-        self._get_prop(dz)["Qg"](u, n, ug, u_dg, ng, stream=self.stream)
+        self._get_prop(dz)["Qg"](n, u, ug, u_dg, ng, stream=self.stream)  # put n as 1st param (match CUDA code)
 
     def merge_prop(self, af, ab):
         self._merge_prop_krn(af, ab, self.kz_gpu, stream=self.stream)

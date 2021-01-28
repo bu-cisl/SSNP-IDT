@@ -21,7 +21,6 @@ ssnp.config.res = (0.1, 0.1, 0.1)
 n = ssnp.read("bb.tiff", dtype=np.double)
 n *= 0.
 ng = gpuarray.empty_like(n)
-# ng_total = gpuarray.empty_like(n)
 
 NA = 0.65
 

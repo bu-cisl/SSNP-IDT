@@ -75,10 +75,10 @@ def bpm_grad_bp(u, ug, dz, n=None, ng=None, config=None, stream=None):
 
 
 def ssnp_grad_bp(u, ug, u_dg, dz, n=None, ng=None, config=None, stream=None):
-    param_check(u_1=u, u_grad=ug, u_d_grad=u_dg, n_grad=ng)
+    param_check(u_1=u, u_grad=ug, u_d_grad=u_dg)
     funcs: SSNPFuncs = get_funcs(ug, config, model="ssnp", stream=stream)
     if n is not None:
-        param_check(u_1=u[0] if len(u.shape) == 3 else u, n=n)
+        param_check(u_1=u[0] if len(u.shape) == 3 else u, n=n, n_grad=ng)
         funcs.scatter_g(u, n, ug, u_dg, ng, dz)
     with funcs.fourier(ug) as ag, funcs.fourier(u_dg) as a_dg:
         funcs.diffract_g(ag, a_dg, dz)

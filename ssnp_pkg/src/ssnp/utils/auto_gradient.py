@@ -108,30 +108,10 @@ class OperationTape:
     class Restart(Exception):
         pass
 
-    @staticmethod
-    def arithmetic_sequence_save(total):
-        if total <= 0:
-            while True:
-                yield True
-        remainder = current = int(np.sqrt(2 * total + 0.25) - 0.5)
-        while True:
-            try:
-                if current >= remainder:
-                    if remainder > 0:
-                        remainder -= 1
-                        current = 0
-                    yield True
-                else:
-                    current += 1
-                    yield False
-            except OperationTape.Restart:
-                remainder = current = int(np.sqrt(2 * total + 0.25) - 0.5)
-                yield
-
     def __init__(self, size=None):
         self.tape = []
-        if size:
-            self.save_hint = self.arithmetic_sequence_save(size)
+        if size is not None:
+            self.save_hint = arithmetic_sequence_save(size)
 
     def append(self, op):
         if self.tape and self.tape[-1].taped_len[1] != op.taped_len[0]:
@@ -208,3 +188,26 @@ class OperationTape:
 
     def __getitem__(self, item):
         return self.tape[item]
+
+
+def arithmetic_sequence_save(total):
+    if total <= 0:
+        while True:
+            try:
+                yield True
+            except OperationTape.Restart:
+                pass
+    remainder = current = int(np.sqrt(2 * total + 0.25) - 0.5)
+    while True:
+        try:
+            if current >= remainder:
+                if remainder > 0:
+                    remainder -= 1
+                    current = 0
+                yield True
+            else:
+                current += 1
+                yield False
+        except OperationTape.Restart:
+            remainder = current = int(np.sqrt(2 * total + 0.25) - 0.5)
+            yield
