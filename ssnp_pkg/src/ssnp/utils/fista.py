@@ -23,21 +23,6 @@ discontig_sub_kernel = pycuda.elementwise.ElementwiseKernel(
     """)
 
 
-# discontig_sub_kernel_cycle = pycuda.elementwise.ElementwiseKernel(
-#     # mem range safe, since i>=step, i-step>=0
-#     "double *arr, double *out, int step, int length, int transpose",
-#     """
-#     if (i % length < step)
-#         step_i = step - length;
-#     else
-#         step_i = step
-#     if (transpose)
-#         out[i-step_i] -= arr[i];
-#     else
-#         out[i] = arr[i] - arr[i-step_i];
-#     """)  # need test
-
-
 def discontig_sub(arr, out, *, axis, transpose=False):
     shape = np.array(arr.shape)
     step = np.prod(shape[axis + 1:])
@@ -108,13 +93,12 @@ def prox_tv_Michael(x, tv_parameter=1.0):
         tv_parameter = (tv_parameter,) * 3
     tmp_out = x._new_like_me()
 
-    def computeTVNorm(x, out):
-        return TVNorm_kernel(out, x)
+    def computeTVNorm(a, out):
+        return TVNorm_kernel(out, a)
 
     shape = (3, *x.shape)
-    u_k = GPUArray(shape, x.dtype, x.allocator)
-    u_k1 = GPUArray(shape, x.dtype, x.allocator)
-    u_k1.fill(0)
+    u_k = GPUArray(shape, x.dtype, x.allocator).fill(0)
+    u_k1 = GPUArray(shape, x.dtype, x.allocator).fill(0)
     # grad_u_hat = af.constant(0.0, x.shape[0], x.shape[1], x.shape[2], dtype = af_float_datatype)
 
     grad_u_hat = x.copy()

@@ -1,4 +1,4 @@
-from typing import Any, Sequence, List, Iterable, Union
+from typing import Any, Sequence, List, Union
 from dataclasses import dataclass, field
 import numpy as np
 
@@ -197,7 +197,7 @@ def arithmetic_sequence_save(total):
                 yield True
             except OperationTape.Restart:
                 pass
-    remainder = current = int(np.sqrt(2 * total + 0.25) - 0.5)
+    remainder = current = int(np.sqrt(2 * total + 0.25) + 0.5)
     while True:
         try:
             if current >= remainder:
@@ -209,5 +209,5 @@ def arithmetic_sequence_save(total):
                 current += 1
                 yield False
         except OperationTape.Restart:
-            remainder = current = int(np.sqrt(2 * total + 0.25) - 0.5)
+            remainder = current = int(np.sqrt(2 * total + 0.25) + 0.5)
             yield
