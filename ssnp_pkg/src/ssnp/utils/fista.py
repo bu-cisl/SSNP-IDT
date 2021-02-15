@@ -86,22 +86,18 @@ def tv_cost(x):
     return pycuda.gpuarray.sum(z[0]).get()
 
 
-def prox_tv_Michael(x, tv_parameter=1.0):
+def prox_tv_Michael(x, tv_parameter=1.0, out=None):
     t_k = 1.0
     num_iter = 20
     if not isinstance(tv_parameter, Sequence):
         tv_parameter = (tv_parameter,) * 3
-    tmp_out = x._new_like_me()
-
-    def computeTVNorm(a, out):
-        return TVNorm_kernel(out, a)
-
     shape = (3, *x.shape)
     u_k = GPUArray(shape, x.dtype, x.allocator).fill(0)
     u_k1 = GPUArray(shape, x.dtype, x.allocator).fill(0)
-    # grad_u_hat = af.constant(0.0, x.shape[0], x.shape[1], x.shape[2], dtype = af_float_datatype)
 
-    grad_u_hat = x.copy()
+    tmp_out = GPUArray(x.shape, x.dtype, x.allocator)
+    grad_u_hat = GPUArray(x.shape, x.dtype, x.allocator) if out is None else out
+    grad_u_hat.set(x)
 
     for iteration in range(num_iter):
         # grad_u_hat: GPUArray = projector(grad_u_hat)
@@ -114,7 +110,7 @@ def prox_tv_Michael(x, tv_parameter=1.0):
         # u_k1[:, :, :, 1] = self._indexLastAxis(u_k1, 1) + (
         #         1.0 / 12 / self.parameter) * self._filterD(grad_u_hat, axis=1)
 
-        computeTVNorm(u_k1, out=tmp_out)
+        TVNorm_kernel(tmp_out, u_k1)
         for i in range(3):
             u_k1[i] /= tmp_out
 
