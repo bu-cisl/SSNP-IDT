@@ -1,18 +1,7 @@
+import env_init  # This module is in current dir
 import numpy as np
-import os
 from time import perf_counter as time
-import platform
-import pycuda.compiler
 from pycuda import gpuarray
-
-if platform.system() == 'Windows':
-    # eliminate "non-UTF8 char" warnings
-    pycuda.compiler.DEFAULT_NVCC_FLAGS = ['-Xcompiler', '/wd 4819']
-    # remove code below if you have valid C compiler in `PATH` already
-    import glob
-    CL_PATH = max(glob.glob(r"C:\Program Files (x86)\Microsoft Visual Studio"
-                            r"\*\*\VC\Tools\MSVC\*\bin\Hostx64\x64\cl.exe"))
-    os.environ['PATH'] += ";" + CL_PATH[:-7]
 
 import ssnp
 from ssnp import BeamArray, calc
