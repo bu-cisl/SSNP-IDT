@@ -8,7 +8,7 @@ import ssnp
 
 ANGLE_NUM = 8
 ssnp.config.res = (0.1, 0.1, 0.1)
-n = ssnp.read("bb.tiff", np.double)
+n = ssnp.read("bb.tiff", np.double, gpu=True)
 n *= 0.01
 NA = 0.65
 u = ssnp.read("plane", np.complex128, shape=n.shape[1:], gpu=False)

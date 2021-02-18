@@ -7,11 +7,11 @@ t = time()
 import ssnp
 
 ssnp.config.res = (0.1, 0.1, 0.1)
-n = ssnp.read("bb.tiff", np.double)
+n = ssnp.read("bb.tiff", np.double, gpu=True)
 n *= 0.01
 NA = 0.65
 steps = []
-u = ssnp.read("plane", np.complex128, shape=n.shape[1:])
+u = ssnp.read("plane", np.complex128, shape=n.shape[1:], gpu=True)
 beam = ssnp.BeamArray(u)
 
 for num in range(8):

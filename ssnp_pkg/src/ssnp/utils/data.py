@@ -90,7 +90,7 @@ def mat_read(path, *, key=None):
     return img
 
 
-def read(source, dtype=None, shape=None, *, scale=1., gpu=True, pagelocked=False, **kwargs):
+def read(source, dtype=None, shape=None, *, scale=1., gpu=False, pagelocked=False, **kwargs):
     """
     Read a ``tf.Tensor`` from source. Method is auto-detected corresponding to the file extension.
 

@@ -7,7 +7,7 @@ import ssnp
 from ssnp import BeamArray, calc
 
 ssnp.config.res = (0.1, 0.1, 0.1)
-n = ssnp.read("bb.tiff", dtype=np.double)
+n = ssnp.read("bb.tiff", dtype=np.double, gpu=True)
 n *= 0.
 ng = gpuarray.empty_like(n)
 
@@ -26,7 +26,7 @@ for num in range(8):
     c_ab = NA * np.cos(xy_theta), NA * np.sin(xy_theta)
     beam_in.forward[num] *= beam.multiplier.tilt(c_ab, trunc=True, gpu=True)
 
-mea = ssnp.read("meabb.tiff", np.double)
+mea = ssnp.read("meabb.tiff", np.double, gpu=True)
 mea *= 2
 
 t = time()
