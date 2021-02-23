@@ -90,12 +90,6 @@ def reduce_mse(u, measurement, stream=None):
     if u.dtype != np.complex128:
         raise ValueError(f"u dtype {u.dtype} is incompatible")
     funcs = get_funcs(u, model="any", stream=stream)
-    # if measurement.dtype == np.complex128:
-    #     result = funcs.reduce_mse_cc(u, measurement)
-    # elif measurement.dtype == np.double:
-    #     result = funcs.reduce_mse_cr(u, measurement)
-    # else:
-    #     raise ValueError(f"measurement dtype {measurement.dtype} is incompatible")
     result = funcs.reduce_mse(u, measurement)
     if stream is None:
         return result.get()
@@ -111,12 +105,6 @@ def reduce_mse_grad(u, measurement, output=None, stream=None):
     if output is None:
         output = gpuarray.empty_like(u)
     funcs.mse_grad(u, measurement, output)
-    # if measurement.dtype == np.complex128:
-    #     funcs.mse_cc_grad(u, measurement, output)
-    # elif measurement.dtype == np.double:
-    #     funcs.mse_cr_grad(u, measurement, output)
-    # else:
-    #     raise ValueError(f"measurement dtype {measurement.dtype} is incompatible")
     return output
 
 

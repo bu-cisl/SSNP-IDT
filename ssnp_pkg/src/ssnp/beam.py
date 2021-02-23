@@ -119,7 +119,7 @@ class BeamArray:
             calc.split_prop(self._u1, self._u2, self._config, stream=self.stream)
             self.relation = BeamArray.BACKWARD
             if self._track:
-                op = Operation([Var(), Var()], [Var(), Var()])
+                op = Operation([Var(), Var()], [Var(), Var()], "split")
                 op.gradient = partial(calc.merge_grad, config=self._config, stream=self.stream)
                 self.tape.append(op)
 
@@ -324,6 +324,39 @@ class BeamArray:
 
     def __isub__(self, other):
         return type(self).__iadd__(self, other, -1)
+
+    def mse_loss(self, forward=None, *, backward=None):
+        # parameter check
+        if self._u2 is None and backward is not None:
+            warn("computing mse loss for forward only beam, backward part is ignored")
+            backward = None
+        if forward is None and backward is None:
+            raise TypeError(f"mse_loss needs at least 1 argument")
+        # mse (and grad) computation
+        loss = 0
+        ufg = ubg = None
+        if forward is not None:
+            loss += calc.reduce_mse(self.forward, forward, self.stream)
+            if self._track:
+                ufg = calc.reduce_mse_grad(self.forward, forward, self._get_array(), self.stream)
+        if backward is not None:
+            loss += calc.reduce_mse(self.backward, backward, self.stream)
+            if self._track:
+                ubg = calc.reduce_mse_grad(self.backward, backward, self._get_array(), self.stream)
+        # append mse op to tape
+        if self._track:
+            if self._u2 is None:
+                op = Operation(Var('uf'), [], "mse_f")
+                op.gradient = lambda: (ufg,)
+            else:
+                op = Operation([Var('uf'), Var('ub')], [], "mse_fb")
+                if ufg is None:
+                    ufg = self._get_array().fill(0, self.stream)
+                if ubg is None:
+                    ubg = self._get_array().fill(0, self.stream)
+                op.gradient = lambda: (ufg, ubg)
+            self.tape.append(op)
+        return loss
 
     def forward_mse_loss(self, measurement):
         loss = calc.reduce_mse(self.forward, measurement)
