@@ -121,6 +121,7 @@ class OperationTape:
 
     def collect_gradient(self, tags, clear=True, reverse=False):
         if clear:  # reinitialize counter
+            next(self.save_hint)  # otherwise the Restart may not be caught
             self.save_hint.throw(OperationTape.Restart)
         if not tags:  # nothing to collect, just clear self if needed
             if clear:
@@ -211,3 +212,26 @@ def arithmetic_sequence_save(total):
         except OperationTape.Restart:
             remainder = current = int(np.sqrt(2 * total + 0.25) + 0.5)
             yield
+
+# another possible solution: use generator.send(...) to restart
+# def arithmetic_sequence_save(total):
+#     # always save if total <= 0
+#     if total <= 0:
+#         while True:
+#             yield True
+#
+#     remainder = current = int(np.sqrt(2 * total + 0.25) + 0.5)
+#     # remainder = current = None  # will be initialized later
+#     restart = None
+#     while True:
+#         if restart is not None:
+#             remainder = current = int(np.sqrt(2 * total + 0.25) + 0.5)
+#             yield
+#         if current >= remainder:
+#             if remainder > 0:
+#                 remainder -= 1
+#                 current = 0
+#             restart = yield True
+#         else:
+#             current += 1
+#             restart = yield False
