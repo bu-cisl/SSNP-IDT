@@ -102,22 +102,24 @@ class Operation:
 #             self.vars_in += op.vars_in
 
 
-class OperationTape:
-    tape: List[Operation] = None
+class OperationTape(list):
+    # tape: List[Operation] = None
 
     class Restart(Exception):
         pass
 
     def __init__(self, size=None):
-        self.tape = []
+        super().__init__()
         if size is not None:
             self.save_hint = arithmetic_sequence_save(size)
 
     def append(self, op):
-        if self.tape and self.tape[-1].taped_len[1] != op.taped_len[0]:
+        if not isinstance(op, Operation):
+            raise TypeError(f"can only append Operation (not '{type(op).__name__}') to OperationTape")
+        if self and self[-1].taped_len[1] != op.taped_len[0]:
             raise ValueError("cannot append operation with incompatible taped variable number "
-                             f"(last out: {self.tape[-1].taped_len[1]})")
-        self.tape.append(op)
+                             f"(last out: {self[-1].taped_len[1]})")
+        super().append(op)
 
     def collect_gradient(self, tags, clear=True, reverse=False):
         if clear:  # reinitialize counter
@@ -125,11 +127,11 @@ class OperationTape:
             self.save_hint.throw(OperationTape.Restart)
         if not tags:  # nothing to collect, just clear self if needed
             if clear:
-                for op in self.tape:
+                for op in self:
                     op.clear()
-            self.tape = []
+            self.clear()
             return
-        if len(self.tape[-1].vars_out):
+        if len(self[-1].vars_out):
             raise ValueError("cannot collect gradient with no loss operation")
         if not isinstance(tags, dict):  # able to provide a tag iterable when no container
             tags = {t: None for t in tags}
@@ -141,8 +143,8 @@ class OperationTape:
             else:  # tag only: list to store output gradients
                 tags_build_list[tag] = []
         taped_grad = []
-        for op_i in reversed(range(len(self.tape))):
-            op = self.tape[op_i]
+        for op_i in reversed(range(len(self))):
+            op = self[op_i]
             grad_out_tags = [v.tag for v in op.vars_in]
             out = {tag: next(it) for tag, it in tags_container_iter.items() if tag in grad_out_tags}
             kwargs = {"out": out} if out else {}
@@ -150,10 +152,10 @@ class OperationTape:
                 grad_in_data = op.backprop(*taped_grad, **kwargs)
             except DataMissing as e:
                 last_saved = op_i - 1
-                while not (taped_out := self.tape[last_saved].taped_out):
+                while not (taped_out := self[last_saved].taped_out):
                     last_saved -= 1
                 for i in range(last_saved, op_i):
-                    taped_out = self.tape[i + 1].recalculate(taped_out)
+                    taped_out = self[i + 1].recalculate(taped_out)
                 try:
                     grad_in_data = op.backprop(*taped_grad, **kwargs)
                 except DataMissing:
@@ -170,25 +172,12 @@ class OperationTape:
             if clear:
                 op.clear()
         if clear:
-            self.tape = []
+            self.clear()
         if tags_build_list:
             if not reverse:
                 for tag in tags_build_list:
                     tags_build_list[tag] = tags_build_list[tag][::-1]
             return tags_build_list
-
-    def __repr__(self):
-        content = ',\n  '.join(repr(o) for o in self.tape)
-        return f"{self.__class__.__name__}([{content}])"
-
-    def __bool__(self):
-        return bool(self.tape)
-
-    def __len__(self):
-        return len(self.tape)
-
-    def __getitem__(self, item):
-        return self.tape[item]
 
 
 def arithmetic_sequence_save(total):
