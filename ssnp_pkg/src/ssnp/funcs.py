@@ -336,6 +336,20 @@ class SSNPFuncs(Funcs):
             loop_prep=local_vars,
             preamble='#include "cuComplex.h"'
         )
+        self._split_grad_krn = elementwise.ElementwiseKernel(
+            # afg = ag - a_dg * I kz = 2 * ag - abg
+            # abg = ag + a_dg * I kz
+            "double2 *ag, double2 *a_dg, double *kz",
+            f"""
+            {kzi_init}
+            a_dg[i].x = ag[i].x - kzi * a_dg[i].y;
+            a_dg[i].y = ag[i].y + kzi * a_dg[i].x;
+            ag[i].x = 2 * ag[i].x - a_dg[i].x;
+            ag[i].y = 2 * ag[i].y - a_dg[i].y;
+            """,
+            loop_prep="double kzi",
+            preamble='#include "cuComplex.h"'
+        )
 
     def _get_prop(self, dz):
         res = self.res
@@ -406,7 +420,7 @@ class SSNPFuncs(Funcs):
         self._merge_grad_krn(afg, abg, self.kz_gpu, stream=self.stream)
 
     def split_grad(self, ag, a_dg):
-        raise NotImplementedError
+        self._split_grad_krn(ag, a_dg, self.kz_gpu, stream=self.stream)
 
 
 class BPMFuncs(Funcs):

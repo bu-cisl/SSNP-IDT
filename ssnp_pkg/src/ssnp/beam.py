@@ -108,9 +108,10 @@ class BeamArray:
         try:
             param_check(beam=self._u1, recycle=arr)
             assert arr.dtype == self.dtype
-            self._array_pool.append(arr)
         except:
             warn("given array is incompatible and not recycled", stacklevel=2)
+        else:
+            self._array_pool.append(arr)
 
     def split_prop(self):
         if self._u2 is None:
@@ -130,7 +131,9 @@ class BeamArray:
             calc.merge_prop(self._u1, self._u2, self._config, stream=self.stream)
             self.relation = BeamArray.DERIVATIVE
             if self._track:
-                warn("cannot track 'merge_prop' operation (not implemented)")
+                op = Operation([Var(), Var()], [Var(), Var()], "merge")
+                op.gradient = partial(calc.split_grad, config=self._config, stream=self.stream)
+                self.tape.append(op)
 
     @property
     def forward(self):
@@ -450,10 +453,12 @@ class BeamArray:
         else:
             self._track = True
         if not self.tape:
-            v_out = [Var("u1_in")]
+            v_in = [Var("u1_in", external=True)]
+            v_out = [Var()]
             if self._u2 is not None:
-                v_out.append(Var("u2_in"))
-            self.tape.append(self._change_op((), v_out))
+                v_in.append(Var("u2_in", external=True))
+                v_out.append(Var())
+            self.tape.append(self._change_op(v_in, v_out))
         yield
         self._track = False
 
@@ -479,11 +484,14 @@ class BeamArray:
             if n_data:
                 if not u_out:
                     raise DataMissing
-                if out and out.get('n', None) is not None:
-                    ng_data = out['n']
+                if out:
+                    if out.get('n', None) is not None:
+                        ng_data = out['n']
+                    else:
+                        logging.info("allocate memory for ng")
+                        ng_data = gpuarray.empty_like(n_data)
                 else:
-                    logging.info("allocate memory for ng")
-                    ng_data = gpuarray.empty_like(n_data)
+                    ng_data = None  # TODO: will raise error if get here. Should fix calc.bpm_grad_bp
             else:
                 ng_data = None
             calc.bpm_grad_bp(u_out.data, ug_in_data, dz, n_data, ng_data, self._config, self.stream)
@@ -517,11 +525,14 @@ class BeamArray:
             if n_data:
                 if not u_out[0]:
                     raise DataMissing
-                if out and out.get('n', None) is not None:
-                    ng_data = out['n']
+                if out:
+                    if out.get('n', None) is not None:
+                        ng_data = out['n']
+                    else:
+                        logging.info("allocate memory for ng")
+                        ng_data = gpuarray.empty_like(n_data)
                 else:
-                    logging.info("allocate memory for ng")
-                    ng_data = gpuarray.empty_like(n_data)
+                    ng_data = None  # TODO: will raise error if get here. Should fix calc.ssnp_grad_bp
             else:
                 ng_data = None
             calc.ssnp_grad_bp(u_out[0].data, ug_in_data, u_dg_in_data, dz, n_data, ng_data,
@@ -555,23 +566,43 @@ class BeamArray:
         return op
 
     def _change_op(self, vars_in, vars_out):
-        def gradient(*arr_in):
-            for arr in arr_in[li:]:
-                self.recycle_array(arr)
-            return arr_in[:li] + tuple(self._get_array().fill(0) for _ in range(li - lo))
+        """
+        Add or delete self._u(1/2)
 
-        def forward(*v_in):
-            for v in v_in[lo:]:
-                if not v.bound:
-                    self.recycle_array(v.data)
-            return v_in[:lo] + tuple(vars_out[li:])
+        :param vars_in: Previous variables list. If add, must have same length as vars_out.
+        Use `external=True` for new places.
 
-        def clear():
-            for v in vars_out:
-                if v:
-                    self.recycle_array(v)
+        :param vars_out: New variables list.
+        :return: an `Operation(name="change")`
+        """
+        def gradient(*arr_in, out):
+            arr_out = []
+            for vi, _, go in zip(vars_in, vars_out, arr_in):
+                if vi.external:
+                    if vi.tag in out:
+                        assert out[vi.tag] is None  # not support out container
+                        arr_out.append(go)
+                    else:
+                        self.recycle_array(go)
+                        arr_out.append(None)  # only a placeholder
+                else:
+                    arr_out.append(go)
+            return arr_out + [self._get_array().fill(0) for _ in range(li - lo)]
+
+        # TODO: fix forward & clear
+        # def forward(*v_in):
+        #     for v in v_in[lo:]:
+        #         if not v.bound:
+        #             self.recycle_array(v.data)
+        #     return v_in[:lo] + tuple(vars_out[li:])
+
+        # def clear():
+        #     for v in vars_out:
+        #         if v:
+        #             self.recycle_array(v)
 
         li, lo = len(vars_in), len(vars_out)
         op = Operation(vars_in, vars_out, "change")
-        op.set_funcs(forward, gradient, clear)
+        op.gradient = gradient
+        # op.set_funcs(forward, gradient, clear)
         return op

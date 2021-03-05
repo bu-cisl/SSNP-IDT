@@ -188,6 +188,16 @@ def merge_grad(ufg, ubg, config=None, copy=False, stream=None):
     u_dg = funcs.ifft(abg)
     return ug, u_dg
 
+def split_grad(ug, u_dg, config=None, copy=False, stream=None):
+    param_check(u_grad=ug, u_d_grad=u_dg)
+    funcs = get_funcs(ug, config, model="ssnp", stream=stream)
+    ag = funcs.fft(ug, copy=copy)
+    a_dg = funcs.fft(u_dg, copy=copy)
+    funcs.split_grad(ag, a_dg)
+    ufg = funcs.ifft(ag)
+    ubg = funcs.ifft(a_dg)
+    return ufg, ubg
+
 
 def get_funcs(arr_like, config=None, *, model="any", stream=None, fft_type="skcuda"):
     name = model.lower()

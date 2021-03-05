@@ -147,6 +147,7 @@ class OperationTape(list):
             op = self[op_i]
             grad_out_tags = [v.tag for v in op.vars_in]
             out = {tag: next(it) for tag, it in tags_container_iter.items() if tag in grad_out_tags}
+            out.update({tag: None for tag in tags_build_list if tag in grad_out_tags})
             kwargs = {"out": out} if out else {}
             try:
                 grad_in_data = op.backprop(*taped_grad, **kwargs)

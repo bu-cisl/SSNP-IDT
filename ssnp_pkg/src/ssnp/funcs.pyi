@@ -98,6 +98,7 @@ class SSNPFuncs(Funcs):
     _merge_prop_krn: ElementwiseKernel
     _split_prop_krn: ElementwiseKernel
     _merge_grad_krn: ElementwiseKernel
+    _split_grad_krn: ElementwiseKernel
 
     def merge_prop(self, af, ab): ...
 
