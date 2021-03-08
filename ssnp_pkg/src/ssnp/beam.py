@@ -575,11 +575,11 @@ class BeamArray:
         :param vars_out: New variables list.
         :return: an `Operation(name="change")`
         """
-        def gradient(*arr_in, out):
+        def gradient(*arr_in, out=None):
             arr_out = []
             for vi, _, go in zip(vars_in, vars_out, arr_in):
                 if vi.external:
-                    if vi.tag in out:
+                    if out and vi.tag in out:
                         assert out[vi.tag] is None  # not support out container
                         arr_out.append(go)
                     else:

@@ -12,18 +12,18 @@ import logging
 class Funcs:
     # __temp_memory_pool = {}
     _funcs_cache = {}
-    reduce_mse_cr_krn = None
+    reduce_sse_cr_krn = None
 
     def __new__(cls, arr_like, res, n0, stream=None, fft_type="reikna"):
-        if cls.reduce_mse_cr_krn is None:
-            Funcs.reduce_mse_cr_krn = reduction.ReductionKernel(
+        if cls.reduce_sse_cr_krn is None:
+            Funcs.reduce_sse_cr_krn = reduction.ReductionKernel(
                 dtype_out=np.double, neutral=0,
                 reduce_expr="a+b",
                 map_expr="(cuCabs(x[i]) - y[i]) * (cuCabs(x[i]) - y[i])",
                 arguments="double2 *x, double *y",
                 preamble='#include "cuComplex.h"'
             )
-            Funcs.reduce_mse_cc_krn = reduction.ReductionKernel(
+            Funcs.reduce_sse_cc_krn = reduction.ReductionKernel(
                 dtype_out=np.double, neutral=0,
                 reduce_expr="a+b",
                 map_expr="cuCabs(cuCsub(x[i], y[i])) * cuCabs(cuCsub(x[i], y[i]))",
@@ -34,7 +34,7 @@ class Funcs:
                 "double2 *u, double2 *m, double2 *out",
                 """
                 out[i] = cuCsub(u[i], m[i]);
-                out[i].x *= 2; out[i].y *= 2;
+                out[i].x *= 2. / (double)n; out[i].y *= 2. / (double)n;
                 """,
                 preamble='#include "cuComplex.h"'
             )
@@ -42,7 +42,7 @@ class Funcs:
                 "double2 *u, double *m, double2 *out",
                 """
                 temp = 2 * (1 - m[i] / cuCabs(u[i]));
-                out[i].x = temp * u[i].x; out[i].y = temp * u[i].y;
+                out[i].x = temp * u[i].x / (double)n; out[i].y = temp * u[i].y / (double)n;
                 """,
                 loop_prep="double temp",
                 preamble='#include "cuComplex.h"'
@@ -131,10 +131,6 @@ class Funcs:
             """,
             loop_prep="unsigned j",
         )
-        # self.reduce_mse_cr = partial(self.reduce_mse_cr_krn, stream=stream)
-        # self.reduce_mse_cc = partial(self.reduce_mse_cc_krn, stream=stream)
-        # self.mse_cc_grad = partial(self.mse_cc_grad_krn, stream=stream)
-        # self.mse_cr_grad = partial(self.mse_cr_grad_krn, stream=stream)
 
     def _initialized(self):
         return self._funcs_cache is None
@@ -162,12 +158,12 @@ class Funcs:
                                  out.gpudata, x.mem_size)
         return out
 
-    def reduce_mse(self, field, measurement):
+    def reduce_sse(self, field, measurement):
         if field.dtype == np.complex128:
             if measurement.dtype == np.float64:
-                return Funcs.reduce_mse_cr_krn(field, measurement, stream=self.stream)
+                return Funcs.reduce_sse_cr_krn(field, measurement, stream=self.stream)
             elif measurement.dtype == np.complex128:
-                return Funcs.reduce_mse_cc_krn(field, measurement, stream=self.stream)
+                return Funcs.reduce_sse_cc_krn(field, measurement, stream=self.stream)
         raise TypeError(f"incompatible dtype: field {field.dtype}, measurement {measurement.dtype}")
 
     def mse_grad(self, field, measurement, gradient):

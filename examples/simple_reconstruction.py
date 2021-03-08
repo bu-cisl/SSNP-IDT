@@ -40,11 +40,11 @@ for step in range(5):
             beam.ssnp(-len(n) / 2)
             beam.a_mul(pupil)
             loss = beam.forward_mse_loss(mea[num])
-        print(f"dir {num}, loss = {loss}")
+        print(f"dir {num}, {loss = :f}")
         beam.n_grad(ng)
-        ng *= 0.005
         ng_total += ng
 
+    ng_total *= 350
     n -= ng_total
     n = gpuarray.maximum(n, 0, out=n)
 print(time() - t)

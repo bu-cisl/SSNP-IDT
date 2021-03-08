@@ -90,11 +90,11 @@ def reduce_mse(u, measurement, stream=None):
     if u.dtype != np.complex128:
         raise ValueError(f"u dtype {u.dtype} is incompatible")
     funcs = get_funcs(u, model="any", stream=stream)
-    result = funcs.reduce_mse(u, measurement)
+    result = funcs.reduce_sse(u, measurement)
     if stream is None:
-        return result.get()
+        return result.get() / u.size
     else:
-        return result.get(pagelocked=True, async_=True, stream=stream)
+        return result.get(pagelocked=True, async_=True, stream=stream) / u.size
 
 
 def reduce_mse_grad(u, measurement, output=None, stream=None):
