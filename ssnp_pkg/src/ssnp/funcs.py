@@ -42,6 +42,8 @@ class Funcs:
                 "double2 *u, double *m, double2 *out",
                 """
                 temp = 2 * (1 - m[i] / cuCabs(u[i]));
+                if (!isfinite(temp))
+                    temp = (double)0;
                 out[i].x = temp * u[i].x / (double)n; out[i].y = temp * u[i].y / (double)n;
                 """,
                 loop_prep="double temp",

@@ -72,10 +72,10 @@ def np_read(path, *, key=None):
     return img
 
 
-def csv_read(path: str):
+def csv_read(path: str, quoting=csv.QUOTE_NONNUMERIC, **kwargs):
     table = []
     with open(path, 'r', newline='') as file:
-        reader = csv.reader(file, quoting=csv.QUOTE_NONNUMERIC)
+        reader = csv.reader(file, quoting=quoting, **kwargs)
         for row in reader:
             table.append(row)
     return np.array(table)
@@ -217,9 +217,9 @@ def binary_write(path, arr, *, scale=1., pre_operator=None, dtype=None, add_hint
     arr.tofile(path)
 
 
-def csv_write(path: str, table):
+def csv_write(path: str, table, **kwargs):
     with open(path, 'w', newline='') as file:
-        writer = csv.writer(file)
+        writer = csv.writer(file, **kwargs)
         for row in table:
             writer.writerow(row)
 
