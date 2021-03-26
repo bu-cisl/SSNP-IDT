@@ -435,7 +435,7 @@ class BPMFuncs(Funcs):
             eva = self.eva
             p_mat = np.exp(kz * (1j * dz))
             p_mat = gpuarray.to_gpu(p_mat * eva)
-            phase_factor = 2 * np.pi * res[2] * n0 * dz
+            phase_factor = 2 * np.pi * res[2] / n0 * dz
             q_op = elementwise.ElementwiseKernel(
                 "double2 *u, double *n_",
                 f"""
