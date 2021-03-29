@@ -380,11 +380,10 @@ class SSNPFuncs(Funcs):
                 # ng = Re{-udg * conj(u) * (d_temp(n) / d_n)}
                 f"""
                     temp = {phase_factor} * n_[i] * ({2 * n0} + n_[i]);
-                    n_g[i] = 0;
                     for (j = 0; j < {self.batch}; j++) {{
                         ug[i + j * n].x -= temp * udg[i + j * n].x;
                         ug[i + j * n].y -= temp * udg[i + j * n].y;
-                        n_g[i] -= (udg[i + j * n].x * u[i + j * n].x + udg[i + j * n].y * u[i + j * n].y) * 
+                        n_g[i + j * n] =- (udg[i + j * n].x * u[i + j * n].x + udg[i + j * n].y * u[i + j * n].y) * 
                             {phase_factor} * ({2 * n0} + 2 * n_[i]);
                     }}
                 """,
