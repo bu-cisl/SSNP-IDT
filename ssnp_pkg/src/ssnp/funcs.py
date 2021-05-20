@@ -361,12 +361,12 @@ class SSNPFuncs(Funcs):
             p_mat = [np.cos(kz * dz), np.sin(kz * dz) / kz,
                      -np.sin(kz * dz) * kz, np.cos(kz * dz)]
             p_mat = [gpuarray.to_gpu((i * eva).astype(np.complex128)) for i in p_mat]
-            phase_factor = (2 * np.pi * res[2]) ** 2 * dz
+            phase_factor = (2 * np.pi * res[2] / n0) ** 2 * dz
             q_op = elementwise.ElementwiseKernel(
                 "double2 *u, double2 *ud, double *n_",
                 f"""
                     temp = n_[i % (n / {self.batch})];
-                    temp = {phase_factor / n0 ** 2} * temp * ({2 * n0} + temp);
+                    temp = {phase_factor} * temp * ({2 * n0} + temp);
                     ud[i].x -= temp * u[i].x;
                     ud[i].y -= temp * u[i].y;
                 """,
