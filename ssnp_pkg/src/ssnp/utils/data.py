@@ -1,8 +1,6 @@
 import sys
 
 import numpy as np
-from tifffile import TiffWriter, TiffFile
-from scipy.io import loadmat, whosmat, savemat
 from warnings import warn
 import os
 import csv
@@ -36,6 +34,7 @@ def predefined_read(name, shape, dtype=None):
 
 
 def tiff_read(path):
+    from tifffile import TiffFile
     """
     Import a TIFF file as numpy array
 
@@ -82,13 +81,27 @@ def csv_read(path: str, quoting=csv.QUOTE_NONNUMERIC, **kwargs):
 
 
 def mat_read(path, *, key=None):
-    if key is None:
-        key = whosmat(path)[0][0]
-    img = loadmat(path)[key]
+    from scipy.io import loadmat, whosmat
+    try:
+        if key is None:
+            key = whosmat(path)[0][0]
+        img = loadmat(path)[key]
+    except NotImplementedError as e:
+        if 'HDF' in e.args[0]:
+            return hdf5_read(path, key=key)
+        else:
+            raise e
     if not isinstance(img, np.ndarray):
         raise TypeError(f"Unknown data type {type(img)} of input image")
     return img
 
+def hdf5_read(path, *, key=None):
+    import h5py
+    with h5py.File(path) as f:
+        if key is None:
+            key = list(f.keys())[0]
+        img = np.array(f[key])
+    return img
 
 def read(source, dtype=None, shape=None, *, scale=1., gpu=False, pagelocked=False, **kwargs):
     """
@@ -105,13 +118,15 @@ def read(source, dtype=None, shape=None, *, scale=1., gpu=False, pagelocked=Fals
     if source in {'plane'}:
         arr = predefined_read(source, shape, dtype)
     elif os.access(source, os.R_OK):
-        ext = os.path.splitext(source)[-1]
+        ext = os.path.splitext(source)[-1].lower()
         if ext in {'.tiff', '.tif'}:
             arr = tiff_read(source)
         elif ext in {'.npy', '.npz'}:
             arr = np_read(source, **kwargs)
         elif ext == '.mat':
             arr = mat_read(source, **kwargs)
+        elif ext == '.hdf5':
+            arr = hdf5_read(source, **kwargs)
         elif ext == '.csv':
             arr = csv_read(source)
         else:
@@ -158,6 +173,7 @@ def tiff_write(path, arr, *, scale=1, pre_operator: callable = None, dtype=np.ui
     :param compress: Using lossless compression
     :param photometric:
     """
+    from tifffile import TiffWriter
     arr = np.squeeze(arr)
     shape = arr.shape
     if photometric == 'rgb':
@@ -225,6 +241,7 @@ def csv_write(path: str, table, **kwargs):
 
 
 def mat_write(path, arr, *, scale=1., pre_operator=None, dtype=None, compress=True, key="data"):
+    from scipy.io import savemat
     if pre_operator is not None:
         arr = pre_operator(arr)
     arr = arr * scale
