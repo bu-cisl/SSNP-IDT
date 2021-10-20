@@ -376,6 +376,30 @@ class BeamArray:
             self.tape.append(op)
         return loss
 
+    def midt_batch_mse_loss(self, measurement):
+        # one direction only
+        assert self._u2 is None
+        assert measurement.dtype == np.float64
+        batch_abs = calc.abs_c2c(self._u1, output=self._get_array(), stream=self.stream)
+        summed_abs = self._get_array()
+        calc.sum_batch(batch_abs, summed_abs[0], stream=self.stream)
+        loss = calc.reduce_mse(summed_abs[0], measurement)
+        if self._track:
+            # 2 * (sum_u - m) * u / abs(u)
+            u1g = self._get_array()
+            u1g.set_async(self._u1, self.stream)
+            batch_abs += 1e-12
+            u1g /= batch_abs
+            summed_abs[0] -= measurement
+            summed_abs[0] *= 2
+            calc.u_mul(u1g, summed_abs[0])  # broadcast to whole batch
+            op = Operation(Var(), [], "sum_real_mse")
+            op.gradient = lambda: (u1g,)
+            self.tape.append(op)
+        self.recycle_array(batch_abs)
+        self.recycle_array(summed_abs)
+        return loss
+
     def _parse(self, info, dz, n, track):
         def step(var_dz, var_n):
             if info[0] == 'bpm':
