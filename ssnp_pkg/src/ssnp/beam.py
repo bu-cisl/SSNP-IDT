@@ -108,8 +108,8 @@ class BeamArray:
         try:
             param_check(beam=self._u1, recycle=arr)
             assert arr.dtype == self.dtype
-        except:
-            warn("given array is incompatible and not recycled", stacklevel=2)
+        except Exception as e:
+            warn("given array is incompatible and not recycled" + str(e), stacklevel=2)
         else:
             self._array_pool.append(arr)
 
@@ -381,19 +381,24 @@ class BeamArray:
         assert self._u2 is None
         assert measurement.dtype == np.float64
         batch_abs = calc.abs_c2c(self._u1, output=self._get_array(), stream=self.stream)
+        batch_abs **= 2  # TODO: change to sqr/sqrt to improve performance
         summed_abs = self._get_array()
         calc.sum_batch(batch_abs, summed_abs[0], stream=self.stream)
+        summed_abs[0] **= 0.5
         loss = calc.reduce_mse(summed_abs[0], measurement)
         if self._track:
-            # 2 * (sum_u - m) * u / abs(u)
+            # 2 * (sqrt(sum_(u^2)) - m) / sqrt(sum_(u^2)) * u
             u1g = self._get_array()
-            u1g.set_async(self._u1, self.stream)
-            batch_abs += 1e-12
-            u1g /= batch_abs
+            temp = u1g
+            temp[0].set_async(summed_abs[0], self.stream)
+            temp[0] += 1.e-12
             summed_abs[0] -= measurement
+            summed_abs[0] /= temp[0]
             summed_abs[0] *= 2
+            # del temp
+            u1g.set_async(self._u1, self.stream)
             calc.u_mul(u1g, summed_abs[0])  # broadcast to whole batch
-            op = Operation(Var(), [], "sum_real_mse")
+            op = Operation(Var(), [], "midt_batch_mse")
             op.gradient = lambda: (u1g,)
             self.tape.append(op)
         self.recycle_array(batch_abs)
@@ -599,6 +604,7 @@ class BeamArray:
         :param vars_out: New variables list.
         :return: an `Operation(name="change")`
         """
+
         def gradient(*arr_in, out=None):
             arr_out = []
             for vi, _, go in zip(vars_in, vars_out, arr_in):
