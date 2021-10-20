@@ -49,6 +49,11 @@ class Funcs:
                 loop_prep="double temp",
                 preamble='#include "cuComplex.h"'
             )
+            Funcs.abs_cc_krn = elementwise.ElementwiseKernel(
+                "double2 *x, double2 *out",
+                "out[i] = make_cuDoubleComplex(cuCabs(x[i]), 0)",
+                preamble='#include "cuComplex.h"'
+            )
 
         if res is not None:
             res = tuple(round(res_i * 1e12) for res_i in res)

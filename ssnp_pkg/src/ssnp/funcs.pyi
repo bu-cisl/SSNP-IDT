@@ -27,6 +27,7 @@ class Funcs:
     reduce_sse_cc_krn: ReductionKernel
     mse_cr_grad_krn: ElementwiseKernel
     mse_cc_grad_krn: ElementwiseKernel
+    abs_cc_krn: ElementwiseKernel
     mul_conj_krn: ElementwiseKernel
     mul_krn: ElementwiseKernel
     sum_cmplx_batch_krn: ElementwiseKernel

@@ -117,6 +117,22 @@ def sum_batch(u, output=None, stream=None):
         funcs.sum_batch(u, output)
 
 
+def copy_batch(u, output, stream=None):
+    param_check(u=u, output=output[0])
+    for out_i in output:
+        out_i.set_async(u, stream)
+
+
+def abs_c2c(u, output, stream=None):
+    param_check(u=u, output=output)
+    funcs = get_funcs(u, model="any", stream=stream)
+    if output is None:
+        output = u
+    funcs.abs_cc_krn(u, output)
+    return output
+
+
+
 def get_multiplier(shape, res=None, stream=None):
     # funcs = get_funcs(arr_like, model="any", stream=stream)
     if res is None:
@@ -187,6 +203,7 @@ def merge_grad(ufg, ubg, config=None, copy=False, stream=None):
     ug = funcs.ifft(afg)
     u_dg = funcs.ifft(abg)
     return ug, u_dg
+
 
 def split_grad(ug, u_dg, config=None, copy=False, stream=None):
     param_check(u_grad=ug, u_d_grad=u_dg)

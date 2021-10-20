@@ -39,6 +39,12 @@ def reduce_mse_grad(u: GPUArray, measurement: GPUArray, output: GPUArray = None,
 def sum_batch(u: GPUArray, output: GPUArray = None, stream: Stream = None): ...
 
 
+def copy_batch(u: GPUArray, output: GPUArray, stream=None): ...
+
+
+def abs_c2c(u: GPUArray, output: GPUArray = None, stream=None): ...
+
+
 def get_multiplier(shape, res=None, stream: Stream = None): ...
 
 
@@ -56,8 +62,10 @@ def split_prop(u: GPUArray, u_d: GPUArray, config: Config = None,
 def merge_grad(ufg: GPUArray, ubg: GPUArray, config: Config = None,
                copy: bool = False, stream: Stream = None) -> Tuple[GPUArray, GPUArray]: ...
 
+
 def split_grad(ug: GPUArray, u_dg: GPUArray, config: Config = None,
                copy: bool = False, stream: Stream = None) -> Tuple[GPUArray, GPUArray]: ...
+
 
 def get_funcs(arr_like: GPUArray, config: Config = None, *,
               model: Literal['ssnp', 'bpm', 'any', 'BPM', 'SSNP', 'Any', 'ANY'] = 'any',
