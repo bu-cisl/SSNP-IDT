@@ -86,6 +86,51 @@ def tv_cost(x):
     return pycuda.gpuarray.sum(z[0]).get()
 
 
+def prox_fgp(z, tv_parameter=1.0, *, num_iter=10, out=None):
+    q_t1 = 1.0
+    shape = (3, *z.shape)
+    # g_t = GPUArray(shape, z.dtype, z.allocator).fill(0)
+    # g_t1, d_t: xyz 3 channel of 3D
+    # z, out/proj_x, tmp_out: 1 channel 3D
+    g_t1 = GPUArray(shape, z.dtype, z.allocator).fill(0)
+    d_t = GPUArray(shape, z.dtype, z.allocator).fill(0)
+
+    tmp_out = GPUArray(z.shape, z.dtype, z.allocator)
+    proj_x = GPUArray(z.shape, z.dtype, z.allocator) if out is None else out
+    for iteration in range(num_iter):
+        tmp_out.fill(0)
+        for i in range(3):
+            discontig_sub(d_t[i], tmp_out, axis=i, transpose=True)
+        tmp_out *= -tv_parameter
+        tmp_out += z
+        pycuda.gpuarray.maximum(tmp_out, 0, out=proj_x)
+        for i in range(3):
+            discontig_sub(proj_x, tmp_out, axis=i)
+            tmp_out *= 1 / (12 * tv_parameter)
+            d_t[i] += tmp_out
+        TVNorm_kernel(tmp_out, d_t)
+        for i in range(3):
+            d_t[i] /= tmp_out
+        # finish 1st line of FGP, now d_t is g_t
+
+        q_t = 0.5 * (1.0 + (1.0 + 4.0 * q_t1 ** 2) ** 0.5)
+        beta = (q_t1 - 1.0) / q_t
+        for i in range(3):
+            # save g_t value
+            tmp_out.set(d_t[i])
+            # modify g_t in place and store in d_t
+            d_t[i]._axpbyz(beta + 1, g_t1[i], -beta, out=d_t[i])
+            # g_t -> g_t1, prepare for next iter
+            g_t1[i].set(tmp_out)
+    tmp_out.fill(0)
+    for i in range(3):
+        discontig_sub(g_t1[i], tmp_out, axis=i, transpose=True)
+    tmp_out *= -tv_parameter
+    tmp_out += z
+    pycuda.gpuarray.maximum(tmp_out, 0, out=proj_x)
+    return proj_x
+
+
 def prox_tv_Michael(x, tv_parameter=1.0, out=None):
     t_k = 1.0
     num_iter = 20
