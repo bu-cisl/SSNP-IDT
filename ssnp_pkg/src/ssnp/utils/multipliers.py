@@ -80,7 +80,7 @@ class Multipliers:
         res = self.res
         c_gamma = self.c_gamma()
         na /= n0  # NA = n0 sin(gamma), use NA' = NA/n0 to make the mask formula the same as air
-        key = ("bp", round(na * 1000), res)
+        key = ("bp", round(na, 3), res)
 
         def calc():
             mask = np.greater(c_gamma, np.sqrt(1 - na ** 2))
@@ -137,7 +137,7 @@ class Multipliers:
         width = float(width)
         if width >= 1 or width <= 0:
             raise ValueError("width should be a relative value in 0-1")
-        key = ("cr", round(width * 100), round(pos * 100), round(total_slices), round(strength * 100))
+        key = ("cr", round(width, 3), round(pos, 3), round(total_slices), round(strength, 3))
         if strength < 0.01:
             warn("strength is too weak, change to 0.01", stacklevel=3)
             strength = 0.01
@@ -208,7 +208,7 @@ class Multipliers:
         for i in mu:
             if i > 1 or i < 0:
                 warn("mu value is out of normal range 0~1")
-        key = ("ga", round(sigma * 100), tuple(round(i * 100) for i in mu))
+        key = ("ga", round(sigma, 3), tuple(round(i, 3) for i in mu))
 
         def calc():
             x, y = [
