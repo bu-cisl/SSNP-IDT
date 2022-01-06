@@ -76,9 +76,10 @@ class Multipliers:
         return key, calc
 
     @_cache_array
-    def binary_pupil(self, na):
+    def binary_pupil(self, na, n0=1):
         res = self.res
         c_gamma = self.c_gamma()
+        na /= n0  # NA = n0 sin(gamma), use NA' = NA/n0 to make the mask formula the same as air
         key = ("bp", round(na * 1000), res)
 
         def calc():

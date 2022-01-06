@@ -113,6 +113,24 @@ class BeamArray:
         else:
             self._array_pool.append(arr)
 
+    def apply_grad(self, grad1, grad2=None):
+        if self._track:
+            param_check(beam=self._u1, grad1=grad1)
+            param_check(beam=self._u2, grad1=grad2)
+            u1g = self._get_array()
+            u1g.set_async(grad1, stream=self.stream)
+            if self._u2 is None:
+                op = Operation(Var(), [], "apply_1grad")
+                op.gradient = lambda: (u1g,)
+            else:
+                op = Operation([Var(), Var()], [], "apply_2grad")
+                u2g = self._get_array()
+                u2g.set_async(grad2, stream=self.stream)
+                op.gradient = lambda: (u1g, u2g)
+            self.tape.append(op)
+        else:
+            raise ValueError(f"applying grad without tracking is useless")
+
     def split_prop(self):
         if self._u2 is None:
             warn("split_prop for forward-only beam is useless")
@@ -246,7 +264,7 @@ class BeamArray:
         return output
 
     def binary_pupil(self, na):
-        self.a_mul(self.multiplier.binary_pupil(na, gpu=True))
+        self.a_mul(self.multiplier.binary_pupil(na, self._config.n0 if self._config else 1, gpu=True))
 
     def mul(self, arr, *, hold=None, track=None):
         """

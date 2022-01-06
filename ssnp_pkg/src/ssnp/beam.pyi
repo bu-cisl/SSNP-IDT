@@ -2,7 +2,7 @@ from contextlib import contextmanager
 
 from pycuda.gpuarray import GPUArray
 from pycuda.driver import Stream
-from typing import Literal, Optional, List, Union, Tuple
+from typing import Literal, Optional, List, Union, Tuple, Iterable
 import numpy as np
 from ssnp.utils import Multipliers, Config
 from ssnp.funcs import Funcs
@@ -52,7 +52,7 @@ class BeamArray:
     @contextmanager
     def track(self): ...
 
-    def n_grad(self, output: GPUArray = None) -> GPUArray: ...
+    def n_grad(self, output: Iterable = None) -> GPUArray: ...
 
     def binary_pupil(self, na: float): ...
 
@@ -73,6 +73,8 @@ class BeamArray:
     def _get_array(self) -> GPUArray: ...
 
     def recycle_array(self, arr: GPUArray): ...
+
+    def apply_grad(self, grad1: GPUArray, grad2: GPUArray = None): ...
 
     @staticmethod
     def _u_setter(u: GPUArray, value, dtype=dtype): ...
