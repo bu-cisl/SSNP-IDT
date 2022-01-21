@@ -290,10 +290,11 @@ class BeamArray:
         if track is None:
             track = self._track
         fourier = self._fft_funcs.fourier
-        if self.batch == 1:
-            param_check(angular_spectrum=self._u1, multiplier=arr, hold=hold and hold._u1)
-        else:
-            param_check(angular_spectrum=self._u1[0], multiplier=arr)
+        # TODO: have bug and not necessary, removed but can be fixed in future
+        # if self.batch == 1:
+        #     param_check(angular_spectrum=self._u1, multiplier=arr, hold=hold and hold._u1)
+        # else:
+        #     param_check(angular_spectrum=self._u1[0], multiplier=arr)
         if hold is not None:
             self.__isub__(hold)
             self.a_mul(arr, track=track)

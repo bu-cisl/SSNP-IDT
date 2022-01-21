@@ -345,12 +345,13 @@ class SSNPFuncs(Funcs):
             "double2 *ag, double2 *a_dg, double *kz",
             f"""
             {kzi_init}
-            a_dg[i].x = ag[i].x - kzi * a_dg[i].y;
+            temp_double = ag[i].x - kzi * a_dg[i].y;
             a_dg[i].y = ag[i].y + kzi * a_dg[i].x;
+            a_dg[i].x = temp_double;
             ag[i].x = 2 * ag[i].x - a_dg[i].x;
             ag[i].y = 2 * ag[i].y - a_dg[i].y;
             """,
-            loop_prep="double kzi",
+            loop_prep="double temp_double; double kzi",
             preamble='#include "cuComplex.h"'
         )
 
