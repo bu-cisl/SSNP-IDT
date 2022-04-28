@@ -2,8 +2,6 @@ from typing import Any, Tuple, Union, Iterable
 import numpy as np
 from pycuda.gpuarray import GPUArray
 
-DEFAULT_TYPE: type
-
 
 def predefined_read(name: str, shape: Tuple[int, ...], dtype: Any = np.float64) -> np.ndarray: ...
 

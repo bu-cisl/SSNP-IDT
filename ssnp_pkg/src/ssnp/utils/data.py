@@ -7,12 +7,6 @@ import csv
 from pycuda import gpuarray
 from pycuda import driver as cuda
 
-DEFAULT_TYPE = np.float64
-
-
-# if raw_img.shape != SIZE[:2]:
-#     raise ValueError(f"Input image size {raw_img.shape} is incompatible"
-#                      f"with x-y size {SIZE[:2]}")
 
 def predefined_read(name, shape, dtype=None):
     """
