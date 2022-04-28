@@ -4,6 +4,7 @@ from warnings import warn
 from collections.abc import Iterable
 import numpy as np
 from pycuda import gpuarray
+from numbers import Number
 
 
 def _cache_array(func):
@@ -80,7 +81,7 @@ class Multipliers:
         res = self.res
         c_gamma = self.c_gamma()
         na /= n0  # NA = n0 sin(gamma), use NA' = NA/n0 to make the mask formula the same as air
-        key = ("bp", round(na, 3), res)
+        key = ("bp", round(na, 4), res)
 
         def calc():
             mask = np.greater(c_gamma, np.sqrt(1 - na ** 2))
@@ -90,32 +91,32 @@ class Multipliers:
         return key, calc
 
     @_cache_array
-    def c_gamma(self):
+    def c_gamma(self, shift=0):
         """
-        Calculate cos(gamma) as a constant array at frequency domain. Gamma is the angle
-        between the wave vector and z-axis. Note: N.A.=sin(gamma)
+        Calculate gamma as a constant array at frequency domain. Gamma is the ``cos`` value of the angle
+        between the wave vector and z-axis. Note: ``NA**2 + gamma**2 == 1``
 
         The array is pre-shifted for later FFT operation.
-
-        :return: cos(gamma) numpy array
+        :param shift: 1 or 2 float numbers in [0, 1) (decimal part is used) marking the position of zero frequency.
+        For example, 0.5 have similar effect as fftshift.
+        :return: gamma as a numpy array
         """
+        if isinstance(shift, Number):
+            shift = (shift, shift)
         xy_size = self._xy_size
         res = self.res
-        key = ("cg", res)
+        key = ("cg", res, *[round(s, 4) for s in shift])
 
         def calc():
             eps = 1E-8
-            c_alpha, c_beta = [
-                np.fft.ifftshift(np.arange(-xy_size[i] / 2, xy_size[i] / 2).astype(np.double)) / xy_size[i] / res[i]
-                for i in (0, 1)
-            ]
+            c_alpha, c_beta = [self._near_0(xy_size[i], shift[i]) / res[i] for i in (0, 1)]
             c_gamma = np.sqrt(np.maximum(1 - (np.square(c_alpha) + np.square(c_beta[:, None])), eps))
             return c_gamma
 
         return key, calc
 
     @staticmethod
-    def _near_0(size, pos_0):
+    def _near_0(size, pos_0, edge=True):
         """
         Return ``f(x)``, which satisfies:
 
@@ -125,11 +126,18 @@ class Multipliers:
 
         ``f(pos_0) = 0``
 
+        The index of the returned array determines x (range is ``[0, 1)``)
+
+        Example of x at size = 3:
+          - Index as edge: x = [0, 1/3, 2/3]
+          - Index as center (edge = False): x = [1/6, 3/6, 5/6]
+
         :param size: arr length
-        :param pos_0: position of zero
-        :return:
+        :param pos_0: a number in [0, 1) (otherwise wrap around and use decimal part) marking the position of zero
+        :param edge: use left edge as x (default), otherwise use center as x.
+        :return: 1-D array of f(x)
         """
-        return np.mod((np.arange(size).astype(np.double) + 0.5) / size + 0.5 - pos_0, 1) - 0.5
+        return np.mod((np.arange(size).astype(np.double) + 0.5 * (not edge)) / size + 0.5 - pos_0, 1) - 0.5
 
     @_cache_array
     def soft_crop(self, width, *, total_slices=1, pos=0, strength=1):
@@ -137,7 +145,7 @@ class Multipliers:
         width = float(width)
         if width >= 1 or width <= 0:
             raise ValueError("width should be a relative value in 0-1")
-        key = ("cr", round(width, 3), round(pos, 3), round(total_slices), round(strength, 3))
+        key = ("cr", round(width, 4), round(pos, 4), round(total_slices), round(strength, 4))
         if strength < 0.01:
             warn("strength is too weak, change to 0.01", stacklevel=3)
             strength = 0.01
@@ -208,7 +216,7 @@ class Multipliers:
         for i in mu:
             if i > 1 or i < 0:
                 warn("mu value is out of normal range 0~1")
-        key = ("ga", round(sigma, 3), tuple(round(i, 3) for i in mu))
+        key = ("ga", round(sigma, 4), tuple(round(i, 4) for i in mu))
 
         def calc():
             x, y = [
