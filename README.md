@@ -1,7 +1,5 @@
 # SSNP-IDT: Split-step non-paraxial model for intensity diffraction tomography
 
----
-
 Python implementation of paper: **High-fidelity intensity diffraction tomography with a non-paraxial multiple-scattering model**.
 This repository includes a highly flexible and easy-to-use Python package based on PyCUDA library, and code examples for simulation and reconstruction.
 
@@ -20,7 +18,7 @@ pip install "git+https://github.com/bu-cisl/SSNP-IDT#subdirectory=ssnp_pkg"
 
 ## License
 
-project is licensed under the terms of the GPL-v3 license. see the LICENSE file for details
+Project is licensed under the terms of the GPL-v3 license. see the LICENSE file for details
 
 ## Reference
 
