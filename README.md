@@ -1,11 +1,36 @@
 # SSNP-IDT: Split-step non-paraxial model for intensity diffraction tomography
 
 Python implementation of paper: **High-fidelity intensity diffraction tomography with a non-paraxial multiple-scattering model**.
+
 This repository includes a highly flexible and easy-to-use Python package based on PyCUDA library, and code examples for simulation and reconstruction.
 
-## Overview
+## Introduction
 
+We propose a novel intensity diffraction tomography (IDT) reconstruction algorithm based on the split-step non-paraxial (SSNP) model for recovering the 3D refractive index (RI) distribution of multiple-scattering biological samples.
+High-quality IDT reconstruction requires high-angle illumination to encode both low- and high- spatial frequency information of the 3D biological sample.
+Our SSNP model can more accurately compute multiple scattering from high-angle illumination compared to paraxial approximation-based multiple-scattering models.
+We apply this SSNP model to both sequential and multiplexed IDT techniques. 
+We develop a unified reconstruction algorithm for both IDT modalities that is highly computationally efficient and is implemented by a modular automatic differentiation framework.
+We demonstrate the capability of our reconstruction algorithm on both weakly scattering buccal epithelial cells and strongly scattering live *C. elegans* worms and live *C. elegans* embryos.
 
+### Annular and multiplexed IDT setups
+
+![](visualize/1.1.svg)
+
+### SSNP model and reconstruction
+
+![](visualize/1.2.svg)
+
+## Results visualization
+### Annular IDT result
+
+![](visualize/3.svg)
+
+![](visualize/4.svg)
+
+### Multiplexed IDT result
+
+![](visualize/5.svg)
 
 ## Installation
 
@@ -19,9 +44,3 @@ pip install "git+https://github.com/bu-cisl/SSNP-IDT#subdirectory=ssnp_pkg"
 ## License
 
 Project is licensed under the terms of the GPL-v3 license. see the LICENSE file for details
-
-## Reference
-
-Sharma, A., & Agrawal, A. (2004). Split-step non-paraxial beam propagation method. *Physics and Simulation of Optoelectronic Devices XII*, 5349, 132. https://doi.org/10.1117/12.528172
-
-Lim, J., Ayoub, A. B., Antoine, E. E., & Psaltis, D. (2019). High-fidelity optical diffraction tomography of multiple scattering samples. *Light: Science & Applications*, 8(1), 82. https://doi.org/10.1038/s41377-019-0195-1
