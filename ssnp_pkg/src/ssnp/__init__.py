@@ -25,6 +25,6 @@ VERSION = '0.0.1rc4'
 import pycuda
 import pycuda.autoinit
 from .data import read, write
-from .calc import ssnp_step, bpm_step, pure_forward_d, binary_pupil, merge_prop, split_prop
+from .calc import ssnp_step, bpm_step, pure_forward_d, binary_pupil, merge_prop, split_prop, config
 from .beam import BeamArray
 from .utils import tilt

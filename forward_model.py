@@ -11,23 +11,26 @@ if platform.system() == 'Windows':
 
 import ssnp
 
-n = ssnp.read("3ball.tiff")
+ssnp.config.res = (0.1, 0.1, 0.1)
+n = ssnp.read("bb.tiff", np.double)
 n *= 0.01
 NA = 0.65
 steps = []
 t = time()
-# u = ssnp.read("plane", np.complex128, shape=n.shape[1:])
+u = ssnp.read("plane", np.complex128, shape=n.shape[1:])
+beam = ssnp.BeamArray(u)
+
 for num in range(8):
     xy_theta = num / 8 * 2 * np.pi
     c_ab = NA * np.cos(xy_theta), NA * np.sin(xy_theta)
     u = ssnp.read("plane", np.complex128, shape=n.shape[1:])
     u, c_ab_trunc = ssnp.tilt(u, c_ab, trunc=True)
-    beam = ssnp.BeamArray(u)
-    beam.set_pure_forward()
+    beam.forward = u
+    beam.backward = 0
     beam.ssnp(1, n)
     beam.ssnp(-len(n) / 2)
     u = beam.forward
-    ssnp.binary_pupil(u, 0.6501)
+    ssnp.binary_pupil(u, 1.0001 * NA)
     steps.append(u.get())
 print(time() - t)
 

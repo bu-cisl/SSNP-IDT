@@ -1,14 +1,11 @@
-_res_deprecated = (0.1, 0.1, 0.1)
-_N0_deprecated = 1
 __funcs_cache = {}
 
 import numpy as np
 from pycuda import gpuarray
 from .funcs import BPMFuncs, SSNPFuncs, Funcs
 from .utils import param_check
+from .const import config
 
-
-# from warnings import warn
 
 def ssnp_step(u, u_d, dz, n=None, output=None):
     """
@@ -22,7 +19,7 @@ def ssnp_step(u, u_d, dz, n=None, output=None):
     :return: new (u, u_d) after a step towards +z direction
     """
     param_check(u=u, u_d=u_d, n=n)
-    funcs: SSNPFuncs = get_funcs(u, _res_deprecated, model="ssnp")
+    funcs: SSNPFuncs = get_funcs(u, config.res, model="ssnp")
     a = funcs.fft(u, output=output)
     a_d = funcs.fft(u_d, output=output)
     funcs.diffract(a, a_d, dz)
@@ -45,7 +42,7 @@ def bpm_step(u, dz, n=None, output=None):
     :return: new (u, u_d) after a step towards +z direction
     """
     param_check(u=u, n=n, output=output)
-    funcs: BPMFuncs = get_funcs(u, _res_deprecated, model="bpm")
+    funcs: BPMFuncs = get_funcs(u, config.res, model="bpm")
     a = funcs.fft(u, output=output)
     funcs.diffract(a, dz)
     u = funcs.ifft(a)
@@ -59,7 +56,7 @@ def bpm_step(u, dz, n=None, output=None):
 
 def bpm_grad_bp(u, ug, dz, n=None, ng=None):
     param_check(u_1=u, ug=ug, n=n, ng=ng)
-    funcs: BPMFuncs = get_funcs(ug, _res_deprecated, model="bpm")
+    funcs: BPMFuncs = get_funcs(ug, config.res, model="bpm")
     if n is not None:
         funcs.scatter_g(u, n, ug, ng, dz)
     ag = funcs.fft(ug)
@@ -97,7 +94,7 @@ def reduce_mse_grad(u, measurement, output=None):
 
 
 def binary_pupil(u, na):
-    funcs = get_funcs(u, _res_deprecated, model="any")
+    funcs = get_funcs(u, config.res, model="any")
     funcs.binary_pupil(u, na)
 
 
@@ -110,7 +107,7 @@ def pure_forward_d(u, output=None):
     :param output: (optional) output memory, must have same shape and dtype
     :return: z partial derivative of u
     """
-    funcs = get_funcs(u, _res_deprecated, model="ssnp")
+    funcs = get_funcs(u, config.res, model="ssnp")
     af = funcs.fft(u, output=funcs.get_temp_mem(u))
     if output is None:
         ab = gpuarray.zeros_like(af)
@@ -129,7 +126,7 @@ def pure_forward_d(u, output=None):
 
 def merge_prop(uf, ub, copy=False):
     param_check(uf=uf, ub=ub)
-    funcs = get_funcs(uf, _res_deprecated, model="ssnp")
+    funcs = get_funcs(uf, config.res, model="ssnp")
     af = funcs.fft(uf, copy=copy)
     ab = funcs.fft(ub, copy=copy)
     funcs.merge_prop_kernel(af, ab, funcs.kz_gpu)
@@ -140,7 +137,7 @@ def merge_prop(uf, ub, copy=False):
 
 def split_prop(u, u_d, copy=False):
     param_check(u=u, u_d=u_d)
-    funcs = get_funcs(u, _res_deprecated, model="ssnp")
+    funcs = get_funcs(u, config.res, model="ssnp")
     a = funcs.fft(u, copy=copy)
     a_d = funcs.fft(u_d, copy=copy)
     funcs.split_prop_kernel(a, a_d, funcs.kz_gpu)
@@ -167,7 +164,7 @@ def get_funcs(arr_like, res, model):
     except KeyError:
         try:
             model = {"ssnp": SSNPFuncs, "bpm": BPMFuncs}[model]
-            funcs = model(arr_like, res, _N0_deprecated)
+            funcs = model(arr_like, res, config.n0)
         except KeyError:
             raise ValueError(f"unknown model {model}") from None
     __funcs_cache[key] = funcs
