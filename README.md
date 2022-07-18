@@ -1,8 +1,14 @@
 # SSNP-IDT: Split-step non-paraxial model for intensity diffraction tomography
 
-Python implementation of paper: **High-fidelity intensity diffraction tomography with a non-paraxial multiple-scattering model**.
+Python implementation of paper: [**High-fidelity intensity diffraction tomography with a non-paraxial multiple-scattering model**](https://arxiv.org/abs/2207.06532).
 
 This repository includes a highly flexible and easy-to-use Python package based on PyCUDA library, and code examples for simulation and reconstruction.
+
+## Citation
+
+If you find this project useful in your research, please consider citing our paper:
+
+Jiabei Zhu, Hao Wang, and Lei Tian, High-fidelity intensity diffraction tomography with a non-paraxial multiple-scattering model. *arXiv:2207.06532*
 
 ## Introduction
 
