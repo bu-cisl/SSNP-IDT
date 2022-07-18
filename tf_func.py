@@ -1,6 +1,8 @@
 from const import *
 import tensorflow as tf
 from tensorflow import Tensor
+from pycuda.compiler import SourceModule
+from pycuda import gpuarray
 import numpy as np
 
 

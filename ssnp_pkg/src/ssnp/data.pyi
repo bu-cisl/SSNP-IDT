@@ -1,9 +1,7 @@
-import tensorflow as tf
-from tensorflow import Tensor, DType
 from typing import Any, Tuple, Union, overload, Iterable
 import numpy as np
 
-DEFAULT_TYPE: DType
+DEFAULT_TYPE: type
 
 
 def predefined_read(name: str, shape: Tuple[int], dtype: Any = tf.float32) -> Tensor: ...

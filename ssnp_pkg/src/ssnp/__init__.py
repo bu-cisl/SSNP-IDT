@@ -21,6 +21,10 @@ import warnings
 if sys.version_info < (3, 6):
     warnings.warn("Untested python version. Please use python>=3.6")
 
+import pycuda
+import pycuda.autoinit
+
 from .data import read, write
-from .tftool import real_to_complex, tilt
+# from .tftool import real_to_complex, tilt
 from .const import VERSION
+from .calc import ssnp_step

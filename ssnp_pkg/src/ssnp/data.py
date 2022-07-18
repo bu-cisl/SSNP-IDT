@@ -1,11 +1,10 @@
-import tensorflow as tf
 import numpy as np
 from tifffile import TiffWriter, TiffFile
 from warnings import warn
 import os
 import csv
 
-DEFAULT_TYPE = tf.float32
+DEFAULT_TYPE = np.float64
 
 
 # if raw_img.shape != SIZE[:2]:
@@ -25,19 +24,18 @@ def predefined_read(name, shape, dtype=DEFAULT_TYPE):
     if shape is None:
         raise ValueError("indeterminate shape")
     if name == "plane":
-        img = tf.ones(shape, dtype)
+        img = np.ones(shape, dtype)
     else:
         raise ValueError(f"unknown image name {name}")
     return img
 
 
-def tiff_read(path, dtype=DEFAULT_TYPE, shape=None):
+def tiff_read(path, dtype=DEFAULT_TYPE):
     """
     Import a TIFF file to ``tf.Tensor``
 
     :param path: Target file path
     :param dtype: Data type of the elements of the resulting tensor
-    :param shape: Dimensions of resulting tensor
     :return: A tensor constant
     """
     with TiffFile(path) as file:
@@ -49,11 +47,10 @@ def tiff_read(path, dtype=DEFAULT_TYPE, shape=None):
         img = img.astype(np.double) / 255
     else:
         raise TypeError(f"Unknown data type {img.dtype.type} of input image")
-    img = tf.constant(img, dtype, shape)
-    return img
+    return img.astype(dtype, copy=False)
 
 
-def np_read(path, dtype=DEFAULT_TYPE, shape=None, *, key=None):
+def np_read(path, dtype=DEFAULT_TYPE, *, key=None):
     ext = os.path.splitext(path)[-1]
     if key is None:
         key = 'arr_0'
@@ -68,7 +65,7 @@ def np_read(path, dtype=DEFAULT_TYPE, shape=None, *, key=None):
                 img = f[f.files[0]]
     else:
         raise ValueError(f"unknown filename extension '{ext}'")
-    return tf.constant(img, dtype, shape)
+    return img.astype(dtype, copy=False)
 
 
 def csv_read(path: str, dtype=DEFAULT_TYPE, shape=None):
@@ -77,7 +74,7 @@ def csv_read(path: str, dtype=DEFAULT_TYPE, shape=None):
         reader = csv.reader(file, quoting=csv.QUOTE_NONNUMERIC)
         for row in reader:
             table.append(row)
-    return tf.constant(table, dtype, shape)
+    return np.array(table, dtype)
 
 
 def read(source: str, dtype=DEFAULT_TYPE, shape=None, **kwargs):
