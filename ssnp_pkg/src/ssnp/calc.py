@@ -115,7 +115,7 @@ def get_multiplier(arr_like, res=None, stream=None):
 def u_mul_grad_bp(ug, mul, copy=False, stream=None):
     funcs = get_funcs(ug, model="any", stream=stream)
     if copy:
-        out = ug.copy()
+        out = gpuarray.to_gpu_async(ug, stream=stream)
     else:
         out = ug
     funcs.mul_grad_bp(out, mul)

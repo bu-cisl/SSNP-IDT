@@ -7,6 +7,7 @@ from warnings import warn
 import os
 import csv
 from pycuda import gpuarray
+from pycuda import driver as cuda
 
 DEFAULT_TYPE = np.float64
 
@@ -89,7 +90,7 @@ def mat_read(path, *, key=None):
     return img
 
 
-def read(source, dtype=None, shape=None, *, scale=1., gpu=True, **kwargs):
+def read(source, dtype=None, shape=None, *, scale=1., gpu=True, pagelocked=False, **kwargs):
     """
     Read a ``tf.Tensor`` from source. Method is auto-detected corresponding to the file extension.
 
@@ -98,6 +99,7 @@ def read(source, dtype=None, shape=None, *, scale=1., gpu=True, **kwargs):
     :param shape:
     :param scale:
     :param gpu: whether load memory to gpu
+    :param pagelocked: for cpu, whether make it pinned
     :return:
     """
     if source in {'plane'}:
@@ -127,6 +129,9 @@ def read(source, dtype=None, shape=None, *, scale=1., gpu=True, **kwargs):
     arr *= scale
     if gpu:
         arr = gpuarray.to_gpu(arr)
+    else:
+        if pagelocked:
+            arr = cuda.register_host_memory(arr)
     return arr
 
 
