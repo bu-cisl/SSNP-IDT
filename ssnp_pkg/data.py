@@ -1,4 +1,5 @@
 from const import *
+from .tftool import real_to_complex
 import tensorflow as tf
 import numpy as np
 from tifffile import TiffWriter, TiffFile
@@ -6,133 +7,180 @@ from warnings import warn
 import os
 import csv
 
+# from tensorflow import Tensor
+
 DEFAULT_TYPE = tf.float32
 
-def _phase_init(c_ab, trunc=False):
-    """
-    :param c_ab: (cos(alpha), cos(beta))
-    :return:
-    """
-    norm = [SIZE[i] * RES[i] * N0 for i in (0, 1)]
-    if trunc:
-        c_ab = [np.trunc(c_ab[i] * norm[i]) / norm[i] for i in (0, 1)]
-    xr, yr = [np.arange(SIZE[i]) / SIZE[i] * c_ab[i] * norm[i] for i in (0, 1)]
-    phase = np.mod(xr + yr[:, None], 1).astype(np.double)
-    return 2 * np.pi * phase, c_ab
 
+# if raw_img.shape != SIZE[:2]:
+#     raise ValueError(f"Input image size {raw_img.shape} is incompatible"
+#                      f"with x-y size {SIZE[:2]}")
 
-def tiff_illumination(path: str, c_ab: tuple):
+def predefined_read(name, shape, dtype=DEFAULT_TYPE):
     """
-    :param path: Amplitude graph path
-    :param c_ab: (cos(alpha), cos(beta))
-    :return: complex tf Tensor of input field
+    Get a predefined tensor
+    ``shape`` can be a ``list`` of integers, a ``tuple`` of integers,
+    or a 1-D ``Tensor`` of type ``int32``
+
+    :param name: predefined image name
+    :param shape: Dimensions of resulting tensor
+    :param dtype: DType of the elements of the resulting tensor
     """
-
-    def convert_01(p: str):
-        with TiffFile(p) as file:
-            raw_img = np.squeeze(np.stack([page.asarray() for page in file.pages]))
-        if raw_img.shape != SIZE[:2]:
-            raise ValueError(f"Input image size {raw_img.shape} is incompatible"
-                             f"with x-y size {SIZE[:2]}")
-        if raw_img.dtype.type == np.uint16:
-            img = raw_img.astype(np.double) / 65535
-        elif raw_img.dtype.type == np.uint8:
-            warn("Importing uint8 image, please use uint16 if possible")
-            img = raw_img.astype(np.double) / 255
-        else:
-            raise TypeError(f"Unknown data type {raw_img.dtype.type} of input image")
-        return img
-
-    if path == "plane":
-        img_in = np.ones(SIZE[:2], np.double)
-    elif os.access(path, os.R_OK):
-        img_in = convert_01(path)
+    if shape is None:
+        raise ValueError("indeterminate shape")
+    if name == "plane":
+        img = tf.ones(shape, dtype)
     else:
-        raise FileNotFoundError(f"'{path}' is not a known illumination type nor a valid file path")
-    phase, c_ab_final = _phase_init(c_ab, trunc=PERIODIC_BOUNDARY)
-    img_in = np.exp(1j * phase) * img_in
-    return tf.constant(img_in, DATA_TYPE), c_ab_final
+        raise ValueError(f"unknown image name {name}")
+    return img
 
 
-def csv_import(path: str):
+def tiff_read(path, dtype=DEFAULT_TYPE, shape=None):
+    """
+    Import a TIFF file to ``tf.Tensor``
+
+    :param path: Target file path
+    :param dtype: Data type of the elements of the resulting tensor
+    :param shape: Dimensions of resulting tensor
+    :return: A tensor constant
+    """
+    with TiffFile(path) as file:
+        img = np.squeeze(np.stack([page.asarray() for page in file.pages]))
+    if img.dtype.type == np.uint16:
+        img = img.astype(np.double) / 65535
+    elif img.dtype.type == np.uint8:
+        warn("Importing uint8 image, please use uint16 if possible")
+        img = img.astype(np.double) / 255
+    else:
+        raise TypeError(f"Unknown data type {img.dtype.type} of input image")
+    img = tf.constant(img, dtype, shape)
+    return img
+
+
+def np_read(path, dtype=DEFAULT_TYPE, shape=None, *, key=None):
+    ext = os.path.splitext(path)[-1]
+    if ext == '.npy':
+        img = np.load(path)
+    elif ext == '.npz':
+        img = np.load(path)[key]
+    else:
+        raise ValueError(f"unknown filename extension '{ext}'")
+    return tf.constant(img, dtype, shape)
+
+
+def csv_read(path: str, dtype=DEFAULT_TYPE, shape=None):
     table = []
     with open(path, 'r', newline='') as file:
         reader = csv.reader(file, quoting=csv.QUOTE_NONNUMERIC)
         for row in reader:
             table.append(row)
-    return table
+    return tf.constant(table, dtype, shape)
 
 
-def csv_export(path: str, table):
+def read(source: str, dtype=DEFAULT_TYPE, shape=None, *, key=None):
+    """
+    Read a ``tf.Tensor`` from source. Method is auto-detected corresponding to the file extension.
+
+    :param source:
+    :param dtype:
+    :param shape:
+    :param key:
+    :return:
+    """
+    if source in {'plane'}:
+        img = predefined_read(source, shape, dtype)
+    elif os.access(source, os.R_OK):
+        ext = os.path.splitext(source)[-1]
+        if ext in {'.tiff', '.tif'}:
+            img = tiff_read(source, dtype, shape)
+        elif ext in {'.npy', '.npz'}:
+            img = np_read(source, dtype, shape, key=key)
+        elif ext == '.csv':
+            img = csv_read(source, dtype, shape)
+        else:
+            raise ValueError(f"unknown filename extension '{ext}'")
+    else:
+        raise FileNotFoundError(f"'{source}' is not a known illumination type nor a valid file path")
+    rank = tf.rank(img)
+    if rank not in {2, 3}:
+        warn(f"Importing {rank}-D image with shape {img.shape}")
+    return img
+
+
+def tiff_write(path, tensor, *, scale=1, pre_operator: callable = None, dtype=np.uint16, compress: bool = True):
+    """
+    Export a list of Tensors to a multi-page tiff
+
+    ``pre_operator`` can apply some numpy functions before the data to be exported, such as brightness
+    and contrast adjustment. Normally it is used to avoid saturation or too dark pictures
+
+    Argument ``scale`` is a simpler way than `pre_operator` to adjust data range.
+    If ``scale`` is ``None``, it will write the raw data. Please note that this is
+    **different** with ``scale=1``
+
+    Argument ``dtype`` means the color depth of the exported image. It must be 16bit - ``np.uint16``
+    (default) or 8bit - ``np.uint8``
+
+    :param path: Target file path
+    :param tensor: Tensor data to be written
+    :param scale: Multiplier to adjust value range
+    :param pre_operator: Preprocess function before scaling
+    :param dtype: Color depth of the exported image
+    :param compress: Using lossless compression
+    """
+    try:
+        with TiffWriter(path) as out_file:
+            for i in tensor:
+                try:
+                    i = i.numpy()
+                except AttributeError as e:
+                    if type(i) == np.ndarray:
+                        warn("Export numpy array is not preferred. Use Tensor instead.", DeprecationWarning)
+                    else:
+                        raise TypeError(f"Must export a list of 2-D Tensors but got {type(i)}") from e
+                if len(i.shape) != 2:
+                    raise ValueError(f"Must export a list of 2-D Tensors but got {len(i.shape)}-D data "
+                                     f"with shape as {i.shape}.")
+                if pre_operator is not None:
+                    i = pre_operator(i)
+                if scale is not None:
+                    i *= scale * {np.uint16: 65535, np.uint8: 255}[dtype]
+                i = i.astype(np.int64)
+                np.clip(i, 0, {np.uint16: 65535, np.uint8: 255}[dtype], out=i)
+                i = i.astype(dtype)
+                if compress:
+                    out_file.save(i, compress=9, predictor=True)
+                else:
+                    out_file.save(i)
+    except KeyError as e:
+        raise TypeError(f"dtype should be either np.uint8 or np.uint16, but not {dtype}") from e
+
+
+def csv_write(path: str, table):
     with open(path, 'w', newline='') as file:
         writer = csv.writer(file)
         for row in table:
             writer.writerow(row)
 
-np.ndarray
-class Image:
-    def __init__(self, path, dtype=DEFAULT_TYPE, shape=None):
 
-        self.tensor = tf.constant(img, dtype, shape)
-
-
-        self.rank = tf.rank(self.tensor)
-        if self.rank not in {2, 3}:
-            warn(f"Importing {self.rank}-D image with shape {self.shape}")
-
-    def write(self, path, *, scale=1, pre_operator: callable = None, dtype=np.uint16):
-        """
-            Export a list of Tensors to a multi-page tiff
-
-            :param path: Target file path
-            :param scale: Multiplier to make value range 0~1. If not provided or is 'None',
-                it will write the raw data. Please note that this is **different** with 'scale=1'
-            :param pre_operator: Preprocess function for numpy data before scaling
-            :param dtype: Color depth of the exported image. Must be 16bit-np.uint16(default) or 8bit-np.uint8
-            """
-        try:
-            with TiffWriter(path) as out_file:
-                for i in self.tensor:
-                    try:
-                        i = i.numpy()
-                    except AttributeError:
-                        if type(i) == np.ndarray:
-                            warn("Export numpy array is not preferred. Use Tensor instead.")
-                        else:
-                            raise TypeError(f"Must export a list of 2-D Tensors but got {type(i)}")
-                    if len(i.shape) != 2:
-                        raise ValueError(f"Must export a list of 2-D Tensors but got {len(i.shape)}-D data "
-                                         f"with shape as {i.shape}.")
-                    if pre_operator is not None:
-                        i = pre_operator(i)
-                    if scale is not None:
-                        i *= scale * {np.uint16: 65535, np.uint8: 255}[dtype]
-                    i = i.astype(np.int64)
-                    np.clip(i, 0, {np.uint16: 65535, np.uint8: 255}[dtype], out=i)
-                    out_file.save(i.astype(dtype), compress=9, predictor=True)
-        except KeyError:
-            raise ValueError(f"dtype should be either np.uint8 or np.uint16, but not {dtype}")
-
-    def __getattr__(self, item):
-        return self.tensor.item
-
-class Field
-
-    def (self, path_type, dtype=DEFAULT_TYPE, ):
-        if path_type == "plane":
-            img_in = np.ones(SIZE[:2], np.double)
-            self.periodic = True
-        elif os.access(path_type, os.R_OK):
-            super().__init__(path_type, dtype)
-        else:
-            raise FileNotFoundError(f"'{path_type}' is not a known illumination type nor a valid file path")
-
-        with TiffFile(path) as file:
-            img = np.squeeze(np.stack([page.asarray() for page in file.pages]))
-        if img.dtype.type == np.uint16:
-            img = img.astype(np.double) / 65535
-        elif img.dtype.type == np.uint8:
-            warn("Importing uint8 image, please use uint16 if possible")
-            img = img.astype(np.double) / 255
-        else:
-            raise TypeError(f"Unknown data type {img.dtype.type} of input image")
+def tilt_illumination(img, c_ab, *, trunc=False):
+    """
+    Tilt an image as illumination
+    :param img: Amplitude graph
+    :param c_ab: (cos(alpha), cos(beta))
+    :param trunc: whether trunc to a grid point in Fourier plane
+    :return: complex tf Tensor of input field
+    """
+    if not img.dtype.is_complex:
+        img = real_to_complex(img)
+    size = img.shape[::-1]
+    if len(size) != 2:
+        raise ValueError(f"Illumination should be a 2-D tensor rather than shape '{img.shape}'.")
+    norm = [size[i] * RES[i] * N0 for i in (0, 1)]
+    if trunc:
+        c_ab = [np.trunc(c_ab[i] * norm[i]) / norm[i] for i in (0, 1)]
+    xr, yr = [np.arange(size[i]) / size[i] * c_ab[i] * norm[i] for i in (0, 1)]
+    phase = np.mod(xr + yr[:, None], 1).astype(np.double) * 2 * np.pi
+    phase = tf.constant(phase, img.dtype)
+    img = tf.exp(1j * phase) * img
+    return img, c_ab
