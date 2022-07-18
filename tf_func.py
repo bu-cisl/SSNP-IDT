@@ -1,6 +1,6 @@
 from const import *
 import tensorflow as tf
-from tensorflow_core import Tensor
+from tensorflow import Tensor
 import numpy as np
 
 
@@ -59,7 +59,7 @@ def _kz():
     return kz
 
 
-def nature_d(u: Tensor):
+def pure_forward_d(u: Tensor):
     """
     Calculate z partial derivative for a initial x-y complex amplitude in free
     (or homogeneous) space due to pure forward propagation.
@@ -148,6 +148,32 @@ def n_ball(n, r, *, z_empty: tuple) -> Tensor:
            :, None, None]
     out = tf.cast(tf.minimum(tf.exp(-arr / (r * r) * 9.21034), 0.0001) * 10000 * n, DATA_TYPE)
     return out
+
+
+@tf.function
+def n_grating(n, r, h) -> Tensor:
+    """
+    :param n: refractive index
+    :param r: circle radius (times of wavelength)
+    :param h: thickness
+    :return: tf constant of the 3d refractive index field
+    """
+    arr = tf.square(tf.cast(tf.range(-SIZE[1] / 2, SIZE[1] / 2), tf.float64) * RES[1])[None, None, :]
+    arr += tf.square(tf.cast(tf.range(-SIZE[0] / 2, SIZE[0] / 2), tf.float64) * RES[0])[None, :, None]
+    arr = tf.cast(arr <= (r ** 2), tf.float64) * n
+    # arr = tf.cast(tf.exp(-arr / (r ** 2)), tf.float64) * n
+    # arr *= (tf.cast(tf.truncatediv(tf.truncatemod(tf.range(h), 4), 2), tf.float64))[:, None, None]
+    out = tf.cast(arr, DATA_TYPE)
+
+    return out
+
+
+def split_forward(u, u_d):
+    a = tf.signal.fft2d(u)
+    a_d = tf.signal.fft2d(u_d)
+    a = (a_d / _kz() / 1j + a) / 2
+    u = tf.signal.ifft2d(a)
+    return u
 
 
 def backprop_loss(model, re, im):
