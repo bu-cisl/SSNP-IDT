@@ -413,3 +413,9 @@ class BeamArray:
             else:
                 for ni in n:
                     step(dz, ni)
+
+    def __del__(self):
+        for arr in self._array_pool:
+            del arr
+        del self._u1
+        del self._u2

@@ -4,6 +4,7 @@ import numpy as np
 from pycuda import gpuarray
 import functools
 from warnings import warn
+from collections.abc import Iterable
 
 
 def param_check(**kwargs):
@@ -57,19 +58,33 @@ class Multipliers:
         self._gpu_cache = {}
 
     @_cache_array
-    def tilt(self, c_ab, *, trunc):
+    def tilt(self, c_ab, *, trunc, periodic_params=None):
         res = self.res
         xy_size = self._xy_size
         norm = tuple(xy_size[i] * res[i] for i in (0, 1))  # to be confirmed: * config.n0
+        kernel = None
         if trunc:
             c_ab = [math.trunc(c_ab[i] * norm[i]) / norm[i] for i in (0, 1)]
+            print(c_ab)
+        elif periodic_params is not None:
+            kernel = self.gaussian(periodic_params[0], (0.5, 0.5), gpu=False)
+            kernel = np.fft.fft2(np.fft.fftshift(kernel))
         c_ab = tuple(float(i) for i in c_ab)
-        key = ("t", c_ab, res)
+        key = ("t", c_ab, res, None if periodic_params is None else periodic_params[0])
 
         def calc():
             xr, yr = [np.arange(xy_size[i]) / xy_size[i] * c_ab[i] * norm[i] for i in (0, 1)]
             phase = np.mod(xr + yr[:, None], 1).astype(np.complex128)
             phase = np.exp(2j * np.pi * phase)
+            if kernel is not None:
+                phase = np.fft.fft2(phase)
+                phase *= kernel
+                phase = np.fft.ifft2(phase)
+                # change fft default f-contiguous output to c-contiguous
+                phase = np.ascontiguousarray(phase)
+            # normalize by center point value
+            phase /= phase[tuple(i // 2 for i in phase.shape)]
+            print(phase[tuple(i // 2 for i in phase.shape)])
             return phase
 
         return key, calc
@@ -152,6 +167,53 @@ class Multipliers:
         return key, calc
 
     @_cache_array
+    def hard_crop(self, width):
+        """
+        Possible width specs:
+
+        * 0~1 ``float``: relative crop value, same for each axis
+        * ``int``: crop pixels, same for each axis
+        * ``Iterable`` (list, tuple, ...): Indicate crop pixels of ``(left, right, top, bottom)``,
+          or ``(x, y)`` for same pixels each side
+
+        :param width: crop size specification
+        """
+        err_width = ValueError(f"invalid width spec {width}")
+        xy_size = self._xy_size
+        if isinstance(width, float):
+            width = width / 2 + 1e-8
+            x_size, y_size = [int(width * i) for i in xy_size]
+            width = (x_size, x_size, y_size, y_size)
+        elif isinstance(width, int):
+            width = (width,) * 4
+        elif isinstance(width, Iterable):
+            width = tuple(width)
+            if len(width) == 2:
+                x_size, y_size = width
+                width = (x_size, x_size, y_size, y_size)
+            elif len(width) != 4:
+                raise err_width
+        else:
+            raise err_width
+        for i in width:
+            if not (isinstance(i, int) and i >= 0):
+                raise err_width
+        key = ("hc", width)
+
+        def calc():
+            x, y = [
+                np.zeros(xy_size[i], bool)
+                for i in (0, 1)
+            ]
+            x1, x2, y1, y2 = width
+            x[x1:-x2] = True
+            y[y1:-y2] = True
+            mask = np.logical_and(x, y[:, None])
+            return mask.astype(np.double)
+
+        return key, calc
+
+    @_cache_array
     def gaussian(self, sigma, mu=(0, 0)):
         xy_size = self._xy_size
         res = self.res
@@ -162,7 +224,7 @@ class Multipliers:
         def calc():
             x, y = [
                 np.exp(-(self._near_0(xy_size[i], mu[i])) ** 2
-                       / 2 / (sigma / res[i] / xy_size[i]) ** 2)
+                       / 2 / (sigma / xy_size[i]) ** 2)
                 for i in (0, 1)
             ]
             mask = x * y[:, None]
