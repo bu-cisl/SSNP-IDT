@@ -1,13 +1,14 @@
 import numpy as np
-from pycuda import elementwise, gpuarray
+from pycuda import elementwise, gpuarray, driver
 from reikna.fft import FFT
 import reikna.cluda as cluda
 
 _res_deprecated = (0.1, 0.1, 0.1)
 _N0_deprecated = 1
 __funcs_cache = {}
+s = driver.Stream()
 api = cluda.cuda_api()
-thr = api.Thread.create()
+thr = api.Thread(s)
 
 
 def ssnp_step(u, u_d, dz, n=None):
@@ -22,12 +23,11 @@ def ssnp_step(u, u_d, dz, n=None):
     """
     shape = u.shape
     try:
-        assert u_d.shape == shape, "u_d"
+        assert u_d.shape == shape, f"u_d shape {u_d.shape}"
         if n is not None:
-            assert n.shape == shape
+            assert n.shape == shape, f"n shape {n.shape}"
     except AssertionError as name:
         raise ValueError(f"cannot match {name} shape {n.shape} with u shape {shape}")
-    # p = _get_ssnp_prop(shape, _res_deprecated, dz)
     funcs = get_funcs(u, _res_deprecated)
 
     a = funcs.fft(u)
@@ -155,13 +155,13 @@ def tilt(img, c_ab, *, trunc=False, copy=False):
     return img, c_ab
 
 
-def get_funcs(p: gpuarray, res):
+def get_funcs(arr_like: gpuarray, res):
     global __funcs_cache
-    key = (tuple(p.shape), tuple(res))
+    key = (tuple(arr_like.shape), tuple(res))
     try:
         return __funcs_cache[key]
     except KeyError:
-        funcs = _Funcs(p, res, _N0_deprecated)
+        funcs = _Funcs(arr_like, res, _N0_deprecated)
         __funcs_cache[key] = funcs
     return funcs
 
@@ -210,6 +210,14 @@ class _Funcs:
         return o
 
     def ifft(self, arr: gpuarray, copy=False):
+        if copy:
+            o = gpuarray.empty_like(arr)
+        else:
+            o = arr
+        self.fft_callable(o, arr, inverse=True)
+        return o
+
+    def ifft_old(self, arr: gpuarray, copy=False):
         w, d = arr.shape
         if copy:
             o = arr.copy()
