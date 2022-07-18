@@ -29,6 +29,20 @@ discontig_sub_kernel = pycuda.elementwise.ElementwiseKernel(
         out[i] = 0;
     """)
 
+# discontig_sub_kernel_cycle = pycuda.elementwise.ElementwiseKernel(
+#     # mem range safe, since i>=step, i-step>=0
+#     "double *arr, double *out, int step, int length, int transpose",
+#     """
+#     if (i % length < step)
+#         step_i = step - length;
+#     else
+#         step_i = step
+#     if (transpose)
+#         out[i-step_i] -= arr[i];
+#     else
+#         out[i] = arr[i] - arr[i-step_i];
+#     """)  # need test
+
 
 def discontig_sub(arr, out, *, axis, transpose=False):
     shape = np.array(arr.shape)
@@ -36,6 +50,19 @@ def discontig_sub(arr, out, *, axis, transpose=False):
     length = step * shape[axis]
     discontig_sub_kernel(arr, out, step, length, 1 if transpose else 0)
     return out
+
+
+TVNorm_kernel = pycuda.elementwise.ElementwiseKernel(
+    "double *out, double *tv",
+    """
+    out[i] = tv[i]*tv[i];
+    out[i] += tv[i+n]*tv[i+n];
+    out[i] += tv[i+2*n]*tv[i+2*n];
+    out[i] = sqrt(out[i]);
+    if (out[i] < 1.)
+        out[i] = 1.;
+    """
+)
 
 
 @lru_cache
@@ -78,6 +105,66 @@ def tv_cost(x):
     z[0] += z[1]
     pycuda.cumath.sqrt(z[0], out=z[0])
     return pycuda.gpuarray.sum(z[0]).get()
+
+
+def prox_tv_Michael(x, tv_parameter=1.0):
+    t_k = 1.0
+    num_iter = 20
+    tmp_out = x._new_like_me()
+
+    def computeTVNorm(x, out):
+        return TVNorm_kernel(out, x)
+
+    shape = (3, *x.shape)
+    u_k = GPUArray(shape, x.dtype, x.allocator)
+    u_k1 = GPUArray(shape, x.dtype, x.allocator)
+    # grad_u_hat = af.constant(0.0, x.shape[0], x.shape[1], x.shape[2], dtype = af_float_datatype)
+
+    grad_u_hat = x.copy()
+
+    for iteration in range(num_iter):
+        # grad_u_hat: GPUArray = projector(grad_u_hat)
+        for i in range(3):
+            discontig_sub(grad_u_hat, tmp_out, axis=i)
+            tmp_out *= 1 / 12 / tv_parameter
+            u_k1[i] += tmp_out
+        # Previously like this (0,1,2)
+        # u_k1[:, :, :, 1] = self._indexLastAxis(u_k1, 1) + (
+        #         1.0 / 12 / self.parameter) * self._filterD(grad_u_hat, axis=1)
+
+        computeTVNorm(u_k1, out=tmp_out)
+        for i in range(3):
+            u_k1[i] /= tmp_out
+
+        t_k1 = 0.5 * (1.0 + (1.0 + 4.0 * t_k ** 2) ** 0.5)
+        beta = (t_k - 1.0) / t_k1
+
+        for i in range(3):
+            tmp_out.set(u_k[i])
+            if iteration < num_iter - 1:
+                u_k[i].set(u_k1[i])
+            u_k1[i] *= 1. + beta
+            tmp_out *= beta
+            u_k1[i] -= tmp_out  # now u_hat
+
+        # previous code: 2 of (0,1,2)
+        # temp = u_k[:, :, :, 2].copy()
+        # if iteration < self.maxitr - 1:
+        #     u_k[:, :, :, 2] = u_k1[:, :, :, 2]
+        # u_k1[:, :, :, 2] = (1.0 + beta) * u_k1[:, :, :, 2] - beta * temp
+
+        grad_u_hat.set(x)
+        u_k1[0]._axpbyz(1, u_k1[1], 1, tmp_out)  # tmp_out = u_k1[0] + u_k1[1]
+        tmp_out += u_k1[2]
+        for i in range(3):
+            discontig_sub(u_k1[i], tmp_out, axis=i, transpose=True)
+        tmp_out *= tv_parameter
+        grad_u_hat -= tmp_out
+        # previous code: (at beginning, not at 0, one more at end)
+        # grad_u_hat = x - tv_parameter * self._filterDT(u_k1)
+
+    # grad_u_hat = projector(grad_u_hat)
+    return grad_u_hat
 
 
 def prox_tv(y: GPUArray, lam):
