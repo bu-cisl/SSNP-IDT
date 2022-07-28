@@ -4,7 +4,7 @@ Module for BeamArray class
 from functools import partial
 from warnings import warn
 import copy
-from collections import Iterable
+from collections.abc import Iterable
 from numbers import Number
 import numpy as np
 from contextlib import contextmanager
