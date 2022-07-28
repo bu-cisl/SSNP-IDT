@@ -40,11 +40,16 @@ We demonstrate the capability of our reconstruction algorithm on both weakly sca
 
 ## Installation
 
-1. Prepare the environment following the [pre-installation steps for PyCUDA](https://wiki.tiker.net/PyCuda/Installation/) on a computer with NVIDIA GPU
+1. Prepare the environment following the [pre-installation steps for PyCUDA](https://wiki.tiker.net/PyCuda/Installation/) on a computer with NVIDIA GPU.
+
+   >Alternative method: If you are using Conda as virtual environment, installing the package [`cudatoolkit-dev`](https://anaconda.org/conda-forge/cudatoolkit-dev) should be enough:
+   >```shell
+   >conda install -c conda-forge cudatoolkit-dev
+   >```
 2. Install the `ssnp` package in this repository
-```shell
-pip install "git+https://github.com/bu-cisl/SSNP-IDT#subdirectory=ssnp_pkg"
-```
+   ```shell
+   pip install "git+https://github.com/bu-cisl/SSNP-IDT#subdirectory=ssnp_pkg"
+   ```
 3. Download the examples and run with Python
 
 ## License
