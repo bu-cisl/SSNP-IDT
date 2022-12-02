@@ -7,7 +7,7 @@ import ssnp
 from ssnp import BeamArray
 
 ssnp.config.res = (0.1, 0.1, 0.1)
-n = ssnp.read("bb.tiff", dtype=np.double, gpu=True)
+n = ssnp.read("sample.tiff", dtype=np.double, gpu=True)
 n *= 0.
 ng = gpuarray.empty_like(n)
 ng_total = gpuarray.empty_like(n)
@@ -24,7 +24,7 @@ for num in range(ANGLE_NUM):
     c_ab = NA * np.cos(xy_theta), NA * np.sin(xy_theta)
     u = u_plane * beam.multiplier.tilt(c_ab, trunc=True, gpu=True)
     u_list.append(u)
-mea = ssnp.read("meabb.tiff", np.double, gpu=True)
+mea = ssnp.read("meas_sim.tiff", np.double, gpu=True)
 mea *= 2
 
 t = time()
@@ -49,4 +49,4 @@ for step in range(5):
     n = gpuarray.maximum(n, 0, out=n)
 print(time() - t)
 
-ssnp.write("ssnp_recbb.tiff", n)
+ssnp.write("ssnp_rec.tiff", n)

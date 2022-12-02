@@ -8,7 +8,7 @@ import ssnp
 
 ANGLE_NUM = 8
 ssnp.config.res = (0.1, 0.1, 0.1)
-n = ssnp.read("bb.tiff", np.double, gpu=True)
+n = ssnp.read("sample.tiff", np.double, gpu=True)
 n *= 0.01
 NA = 0.65
 u = ssnp.read("plane", np.complex128, shape=n.shape[1:], gpu=False)
@@ -29,4 +29,4 @@ beam.binary_pupil(1.0001 * NA)
 measurements = beam.forward.get()
 print(time() - t)
 
-ssnp.write("cudatest.tiff", measurements, scale=0.5, pre_operator=lambda x: np.abs(x))
+ssnp.write("meas_sim.tiff", measurements, scale=0.5, pre_operator=lambda x: np.abs(x))

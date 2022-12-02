@@ -7,7 +7,7 @@ t = time()
 import ssnp
 
 ssnp.config.res = (0.1, 0.1, 0.1)
-n = ssnp.read("bb.tiff", np.double, gpu=True)
+n = ssnp.read("sample.tiff", np.double, gpu=True)
 n *= 0.01
 NA = 0.65
 steps = []
@@ -27,4 +27,4 @@ for num in range(8):
     steps.append(beam.forward.get())
 print(time() - t)
 
-ssnp.write("cudatest.tiff", np.stack(steps), scale=0.5, pre_operator=lambda x: np.abs(x))
+ssnp.write("meas_sim.tiff", np.stack(steps), scale=0.5, pre_operator=lambda x: np.abs(x))

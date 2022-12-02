@@ -6,11 +6,11 @@ from pycuda import gpuarray
 import ssnp
 from ssnp import BeamArray, calc
 
-n = ssnp.read("bb.tiff", dtype=np.double, gpu=True)
+n = ssnp.read("sample.tiff", dtype=np.double, gpu=True)
 n.fill(0)  # zero initialization
 ng = gpuarray.empty_like(n)
 
-mea = ssnp.read("meabb.tiff", np.double, gpu=True)
+mea = ssnp.read("meas_sim.tiff", np.double, gpu=True)
 mea *= 2  # restore data (divided by 2 before save)
 
 ssnp.config.res = (0.1, 0.1, 0.1)
@@ -52,4 +52,4 @@ for step in range(STEPS):
     n = gpuarray.maximum(n, 0, out=n)  # positive regularization
 print(time() - t)
 
-ssnp.write("ssnp_recbb.tiff", n)
+ssnp.write("ssnp_rec.tiff", n)
