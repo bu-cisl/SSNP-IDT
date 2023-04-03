@@ -5,6 +5,19 @@ import numpy as np
 
 @dataclass
 class Variable:
+    """
+    A dataclass of one variable. All fields are optional (e.g. a simple placeholder if no arguments provided)
+
+    ``tag``: Name for this variable;
+
+    ``data``: Reference of the data of this variable for future use;
+
+    ``external``: Marking this Variable as input/output data (which means it is not an intermediate result)
+
+    ``bound``: Set when constructing an ``Operation``. If bound is not set,
+    it is a temporary free variable and the memory is managed by itself (can be recycled after used).
+    Otherwise, the memory of its data field should be managed by the operation which it was bound to
+    """
     tag: str = None
     data: Any = field(default=None, repr=False)
     external: bool = False
