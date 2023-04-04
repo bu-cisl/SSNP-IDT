@@ -145,28 +145,7 @@ def read(source, dtype=None, shape=None, *, scale=1., gpu=False, pagelocked=Fals
 
 
 def tiff_write(path, arr, *, scale=1, pre_operator: callable = None, dtype=np.uint16,
-               compress: bool = True, photometric=None):
-    """
-    Export a list of Tensors to a multi-page tiff
-
-    ``pre_operator`` can apply some numpy functions before the data to be exported, such as brightness
-    and contrast adjustment. Normally it is used to avoid saturation or too dark pictures
-
-    Argument ``scale`` is a simpler way than `pre_operator` to adjust data range.
-    If ``scale`` is ``None``, it will write the raw data. Please note that this is
-    **different** with ``scale=1``
-
-    Argument ``dtype`` means the color depth of the exported image. It must be 16bit - ``np.uint16``
-    (default) or 8bit - ``np.uint8``
-
-    :param path: Target file path
-    :param arr: Tensor data to be written
-    :param scale: Multiplier to adjust value range
-    :param pre_operator: Preprocess function before scaling
-    :param dtype: Color depth of the exported image
-    :param compress: Using lossless compression
-    :param photometric:
-    """
+               compression='zlib', photometric=None):
     from tifffile import TiffWriter
     arr = np.squeeze(arr)
     shape = arr.shape
@@ -190,16 +169,17 @@ def tiff_write(path, arr, *, scale=1, pre_operator: callable = None, dtype=np.ui
             except KeyError:
                 raise TypeError(f"dtype should be either np.uint8 or np.uint16, but not {dtype}") from None
             i = i.astype(dtype)
-            if compress:
-                out_file.save(i, compress=9, predictor=True, photometric=photometric)
+            if compression is not None:
+                out_file.write(i, compression=compression, predictor=True, photometric=photometric)
             else:
-                out_file.save(i, photometric=photometric)
+                out_file.write(i, photometric=photometric)
 
 
-def np_write(path, arr, *, scale=1., pre_operator=None, dtype=None, compress=True):
+def np_write(path, arr, *, scale=None, pre_operator=None, dtype=None, compress=True):
     if pre_operator is not None:
         arr = pre_operator(arr)
-    arr = arr * scale
+    if scale is not None:
+        arr = arr * scale
     if dtype is not None:
         arr = arr.astype(dtype)
     ext = os.path.splitext(path)[-1]
@@ -209,10 +189,11 @@ def np_write(path, arr, *, scale=1., pre_operator=None, dtype=None, compress=Tru
         np.savez_compressed(path, arr) if compress else np.savez(path, arr)
 
 
-def binary_write(path, arr, *, scale=1., pre_operator=None, dtype=None, add_hint=False):
+def binary_write(path, arr, *, scale=None, pre_operator=None, dtype=None, add_hint=False):
     if pre_operator is not None:
         arr = pre_operator(arr)
-    arr = arr * scale
+    if scale is not None:
+        arr = arr * scale
     if dtype is not None:
         arr = arr.astype(dtype)
     if add_hint:
@@ -234,11 +215,12 @@ def csv_write(path: str, table, **kwargs):
             writer.writerow(row)
 
 
-def mat_write(path, arr, *, scale=1., pre_operator=None, dtype=None, compress=True, key="data"):
+def mat_write(path, arr, *, scale=None, pre_operator=None, dtype=None, compress=True, key="data"):
     from scipy.io import savemat
     if pre_operator is not None:
         arr = pre_operator(arr)
-    arr = arr * scale
+    if scale is not None:
+        arr = arr * scale
     if dtype is not None:
         arr = arr.astype(dtype)
     savemat(path, {key: arr}, do_compression=compress)
