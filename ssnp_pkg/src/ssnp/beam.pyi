@@ -66,6 +66,11 @@ class BeamArray:
 
     def __isub__(self, other: BeamArray): ...
 
+    def conj(self):
+        """
+        Conjugate the field. Should only apply to forward-only beams
+        """
+
     def split_prop(self): ...
 
     def merge_prop(self): ...

@@ -147,7 +147,7 @@ class Funcs:
     def op_krn(batch, xt, yt, zt, operator, name=None, y_func=None):
         y_i = f"y[i % (n / {batch})]"
         if y_func is not None:
-            y_i = f"{y_func}(y_i)"
+            y_i = f"{y_func}({y_i})"
         return elementwise.get_elwise_kernel(
             f"{xt} *x, {yt} *y, {zt} *z",
             f"z[i] = x[i] {operator} {y_i}",
@@ -252,15 +252,17 @@ class Funcs:
         """
         raise NotImplementedError
 
-    def conj(self, arr: GPUArray):
-        """copy from GPUArray.conj(self), do conj in-place"""
+    def conj(self, arr, out=None):
+        if out is None:
+            out = arr
         dtype = arr.dtype
         if not arr.flags.forc:
             raise RuntimeError("only contiguous arrays may "
                                "be used as arguments to this operation")
         func = elementwise.get_conj_kernel(dtype)
         func.prepared_async_call(arr._grid, arr._block, self.stream,
-                                 arr.gpudata, arr.gpudata, arr.mem_size)
+                                 arr.gpudata, out.gpudata, arr.mem_size)
+        return out
 
     # @staticmethod
     # def get_temp_mem(arr_like: GPUArray, index=0):

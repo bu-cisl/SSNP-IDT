@@ -76,6 +76,14 @@ class Funcs:
     def op(self, x: GPUArray, operator: Literal["+", "-", "*", "/"], y: GPUArray, out: GPUArray = None,
            name: str = None, y_func: str = None): ...
 
+    def conj(self, arr: GPUArray, out: GPUArray = None) -> None:
+        """
+        copied from GPUArray.conj(self), do conj in-place
+        :param arr: the input GPUArray to apply conjugate
+        :param out: the output GPUArray. None for in-place operation (Default)
+        :return: out
+        """
+
 
 class BPMFuncs(Funcs):
     def _get_prop(self, dz): ...

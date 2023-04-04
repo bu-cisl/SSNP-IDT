@@ -168,7 +168,7 @@ def u_mul(u, mul, copy=False, out=None, stream=None, conj=False):
             param_check(u=u[0], mul=mul)
     else:
         param_check(u=u, mul=mul)
-    funcs.op(u, '*', mul, out, name='mul', y_func='conj' if conj else None)
+    funcs.op(u, '*', mul, out, name='mul', y_func='pycuda::conj' if conj else None)
     return out
 
 

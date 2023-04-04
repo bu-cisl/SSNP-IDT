@@ -347,6 +347,21 @@ class BeamArray:
     def __isub__(self, other):
         return type(self).__iadd__(self, other, -1)
 
+    def conj(self):
+        if self._u2 is not None:
+            raise NotImplementedError("does not support conj op for bi-dir beam (is it meaningful?)")
+        self._fft_funcs.conj(self._u1)
+        if self._track:
+            op = Operation(Var(), Var(), "conj")
+            op.set_funcs(
+                forward=lambda var: Var(
+                    data=self._fft_funcs.conj(var.data, out=self._get_array() if var.bound else None)
+                ),
+                gradient=lambda ug: [self._fft_funcs.conj(ug)]
+            )
+            self.tape.append(op)
+        return self
+
     def mse_loss(self, forward=None, *, backward=None):
         # parameter check
         if self._u2 is None and backward is not None:
