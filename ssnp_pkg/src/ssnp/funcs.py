@@ -259,7 +259,10 @@ class Funcs:
         if not arr.flags.forc:
             raise RuntimeError("only contiguous arrays may "
                                "be used as arguments to this operation")
-        func = elementwise.get_conj_kernel(dtype)
+        try:  # remove this after testing
+            func = elementwise.get_conj_kernel(dtype)
+        except TypeError:  # new pycuda add a 'conj_dtype' parameter for output
+            func = elementwise.get_conj_kernel(dtype, dtype)
         func.prepared_async_call(arr._grid, arr._block, self.stream,
                                  arr.gpudata, out.gpudata, arr.mem_size)
         return out

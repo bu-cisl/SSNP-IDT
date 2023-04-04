@@ -544,7 +544,7 @@ class BeamArray:
         vars_in = Var('u_in') if n_data is None else (Var('u_in'), Var('n', n_data, external=True))
 
         def gradient(ug_in_data, out: dict = None):
-            if n_data:
+            if n_data is not None:
                 if not u_out:
                     raise DataMissing
                 if out:
@@ -561,7 +561,7 @@ class BeamArray:
             return (ug_in_data,) if ng_data is None else (ug_in_data, ng_data)
 
         def forward(u_in: Var):
-            if n_data:
+            if n_data is not None:
                 if u_in.bound:
                     u_out.data = self._get_array()
                 else:

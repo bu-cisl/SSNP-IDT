@@ -1,6 +1,6 @@
 ## Changelog
 
-### 0.0.2 (developing)
+### 0.0.2 (Apr 4, 2023)
 
 * Add skcuda as a substitution of reikna
 * Enable to compute several illumination on the same object in a batch
