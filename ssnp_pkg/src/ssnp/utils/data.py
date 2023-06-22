@@ -27,24 +27,33 @@ def predefined_read(name, shape, dtype=None):
     return img
 
 
-def tiff_read(path):
+def tiff_read(path, scale=1., dtype=np.float64):
     from tifffile import TiffFile
-    """
-    Import a TIFF file as numpy array
-
-    :param path: Target file path
-    :return: A tensor constant
-    """
     with TiffFile(path) as file:
-        img = np.squeeze(np.stack([page.asarray() for page in file.pages]))
-    if img.dtype.type == np.uint16:
-        img = img.astype(np.double) / 65535
-    elif img.dtype.type == np.uint8:
-        warn("Importing uint8 image, please use uint16 if possible")
-        img = img.astype(np.double) / 255
+        pages = file.pages
+        img0 = pages[0].asarray()
+        if (l := len(pages)) == 1:  # for single page, img0 is all the data
+            img = img0
+        else:  # for multipage, pre-allocate the output and iteratively fill each page
+            img = np.empty_like(img0, shape=(l, *img0.shape))
+            for mem, page in zip(img, pages):
+                page.asarray(out=mem)
+
+    if dtype is None:  # no post-processing
+        return img
+    original_type = img.dtype.type
+    original_max = np.iinfo(original_type).max
+    if issubclass(dtype, np.integer):
+        if scale is not None:
+            warn("scaling the data is not supported for integer")
+            scale = None
+        if np.iinfo(dtype).max < original_max:
+            warn(f"Converting the image data to a smaller integer type. Values may overflow.")
+
+    if scale is None:
+        return img.astype(dtype)
     else:
-        raise TypeError(f"Unknown data type {img.dtype.type} of input image")
-    return img
+        return img.astype(dtype) * (scale / original_max)
 
 
 def np_read(path, *, key=None):
@@ -89,6 +98,7 @@ def mat_read(path, *, key=None):
         raise TypeError(f"Unknown data type {type(img)} of input image")
     return img
 
+
 def hdf5_read(path, *, key=None):
     import h5py
     with h5py.File(path) as f:
@@ -96,6 +106,7 @@ def hdf5_read(path, *, key=None):
             key = list(f.keys())[0]
         img = np.array(f[key])
     return img
+
 
 def read(source, dtype=None, shape=None, *, scale=1., gpu=False, pagelocked=False, **kwargs):
     """
@@ -109,39 +120,46 @@ def read(source, dtype=None, shape=None, *, scale=1., gpu=False, pagelocked=Fals
     :param pagelocked: for cpu, whether make it pinned
     :return:
     """
-    if source in {'plane'}:
-        arr = predefined_read(source, shape, dtype)
-    elif os.access(source, os.R_OK):
-        ext = os.path.splitext(source)[-1].lower()
-        if ext in {'.tiff', '.tif'}:
-            arr = tiff_read(source)
-        elif ext in {'.npy', '.npz'}:
-            arr = np_read(source, **kwargs)
-        elif ext == '.mat':
-            arr = mat_read(source, **kwargs)
-        elif ext == '.hdf5':
-            arr = hdf5_read(source, **kwargs)
-        elif ext == '.csv':
-            arr = csv_read(source)
+    def dispatch():
+        if source in {'plane'}:
+            return predefined_read(source, shape, dtype) * scale
+        elif os.access(source, os.R_OK):
+            ext = os.path.splitext(source)[-1].lower()
+            if ext in {'.tiff', '.tif'}:  # tiff read
+                if scale is not None and dtype is None:
+                    arr = tiff_read(source, scale)
+                else:
+                    arr = tiff_read(source, scale, dtype)
+            else:  # general read
+                if ext in {'.npy', '.npz'}:
+                    arr = np_read(source, **kwargs)
+                elif ext == '.mat':
+                    arr = mat_read(source, **kwargs)
+                elif ext == '.hdf5':
+                    arr = hdf5_read(source, **kwargs)
+                elif ext == '.csv':
+                    arr = csv_read(source)
+                else:
+                    raise ValueError(f"unknown filename extension '{ext}'")
+                if dtype is not None:
+                    arr = arr.astype(dtype, copy=False)
+                arr *= scale
+            if shape is not None and tuple(shape) != tuple(arr.shape):
+                arr = arr.reshape(shape)
+            return arr
         else:
-            raise ValueError(f"unknown filename extension '{ext}'")
-        if dtype is not None:
-            arr = arr.astype(dtype, copy=False)
+            raise FileNotFoundError(f"'{source}' is not a known illumination type nor a valid file path")
 
-    else:
-        raise FileNotFoundError(f"'{source}' is not a known illumination type nor a valid file path")
-    if shape is not None and tuple(shape) != tuple(arr.shape):
-        arr = arr.reshape(shape)
-    rank = len(arr.shape)
+    output_arr = dispatch()
+    rank = len(output_arr.shape)
     if rank not in {2, 3}:
-        warn(f"Importing {rank}-D image with shape {arr.shape}", stacklevel=2)
-    arr *= scale
+        warn(f"Importing {rank}-D image with shape {output_arr.shape}", stacklevel=2)
+
     if gpu:
-        arr = gpuarray.to_gpu(arr)
-    else:
-        if pagelocked:
-            arr = cuda.register_host_memory(arr)
-    return arr
+        return gpuarray.to_gpu(output_arr)
+    if pagelocked:
+        return cuda.register_host_memory(output_arr)
+    return output_arr
 
 
 def tiff_write(path, arr, *, scale=1, pre_operator: callable = None, dtype=np.uint16,
