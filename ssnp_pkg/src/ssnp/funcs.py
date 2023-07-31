@@ -111,7 +111,7 @@ class Funcs:
             self.n0 = n0
             self.multiplier = Multipliers(shape, res, stream)
             c_gamma = self.multiplier.c_gamma()
-            c_gamma = np.broadcast_to(c_gamma, arr_like.shape)
+            # c_gamma = np.broadcast_to(c_gamma, arr_like.shape)  # propagation is batched so no extra copies are needed
             kz = c_gamma * (2 * np.pi * res[2])
             self.kz = kz.astype(np.double)
             self.kz_gpu = gpuarray.to_gpu(kz)
