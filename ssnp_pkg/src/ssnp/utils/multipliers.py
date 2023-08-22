@@ -46,6 +46,7 @@ class Multipliers:
         res = self.res
         shape = self._shape
         xy_size = self._xy_size
+        shape = self._shape
         norm = tuple(xy_size[i] * res[i] for i in (0, 1))  # to be confirmed: * config.n0
         kernel = None
         if trunc:
@@ -241,74 +242,3 @@ class Multipliers:
             return mask
 
         return key, calc
-
-if __name__ == '__main__':
-
-    from timeit import timeit
-
-    res = (0.25, 0.25, 1)
-    xy_size = (2**12, 2**12)
-    norm = tuple(xy_size[i] * res[i] for i in (0, 1))  # to be confirmed: * config.n0
-
-    kernel = Multipliers(xy_size, res).gaussian(0.5, (0.5, 0.5), gpu=False)
-    kernel = np.fft.fft2(np.fft.fftshift(kernel))
-    NA = 0.65
-
-    angle = 0.25 * np.pi
-
-    c_ab = (NA * np.cos(angle), NA * np.sin(angle))
-
-    c_ab = [math.trunc(c_ab[i] * norm[i]) / norm[i] for i in (0, 1)]
-    c_ab = tuple(float(i) for i in c_ab)
-    
-    def calc_new(out : np.ndarray | None = None):
-
-        if out is None:
-            out = np.empty(xy_size[:2][::-1], dtype=np.complex128)
-
-        xr = np.arange(xy_size[0], dtype=np.complex128)
-        xr.real *= (2 * np.pi * c_ab[0] * norm[0] / xy_size[0])
-        np.sin(xr.real, out=xr.imag)
-        np.cos(xr.real, out=xr.real)
-
-        yr = np.arange(xy_size[1], dtype=np.complex128)
-        yr.real *= (2 * np.pi * c_ab[1] * norm[1] / xy_size[1])
-        np.sin(yr.real, out=yr.imag)
-        np.cos(yr.real, out=yr.real)
-
-        np.outer(yr, xr, out=out)
-
-        if kernel is not None:
-            out_fourier = np.fft.fft2(out)
-            out_fourier *= kernel
-            out_fourier = np.fft.ifft2(out_fourier)
-            np.copyto(out, out_fourier)
-
-        # normalize by center point value
-        out /= out[tuple(i // 2 for i in out.shape)]
-        return out
-    
-    def calc_old():
-        xr, yr = [np.arange(xy_size[i]) / xy_size[i] * c_ab[i] * norm[i] for i in (0, 1)]
-        phase = np.mod(xr + yr[:, None], 1).astype(np.complex128)
-        phase = np.exp(2j * np.pi * phase)
-        if kernel is not None:
-            phase = np.fft.fft2(phase)
-            phase *= kernel
-            phase = np.fft.ifft2(phase)
-            # change fft default f-contiguous output to c-contiguous
-            phase = np.ascontiguousarray(phase)
-        # normalize by center point value
-        phase /= phase[tuple(i // 2 for i in phase.shape)]
-        # np.testing.assert_almost_equal(phase[tuple(i // 2 for i in phase.shape)], 1)
-        return phase
-    
-    new_time = timeit(calc_new, number=100)
-    old_time = timeit(calc_old, number=100)
-
-    new_val = calc_new()
-    old_val = calc_old()
-
-    np.testing.assert_almost_equal(new_val, old_val)
-
-    print(f"new: {new_time:.3f}, old: {old_time:.3f}, ratio: {new_time/old_time:.3f}")
