@@ -60,19 +60,25 @@ class Multipliers:
         key = ("t", c_ab, res, None if periodic_params is None else periodic_params[0])
 
         def calc():
-            xr, yr = [np.arange(xy_size[i]) / xy_size[i] * c_ab[i] * norm[i] for i in (0, 1)]
-            phase = np.mod(xr + yr[:, None], 1).astype(np.complex128)
-            phase = np.exp(2j * np.pi * phase)
+            xr = np.arange(xy_size[0], dtype=np.complex128)
+            xr *= 2j * np.pi * c_ab[0] * norm[0] / xy_size[0]
+            np.exp(xr, out=xr)
+
+            yr = np.arange(xy_size[1], dtype=np.complex128)
+            yr *= 2j * np.pi * c_ab[1] * norm[1] / xy_size[1]
+            np.exp(yr, out=yr)
+
+            out = np.outer(yr, xr)
+
             if kernel is not None:
-                phase = np.fft.fft2(phase)
-                phase *= kernel
-                phase = np.fft.ifft2(phase)
+                out = np.fft.fft2(out)
+                out *= kernel
+                out = np.fft.ifft2(out)
                 # change fft default f-contiguous output to c-contiguous
-                phase = np.ascontiguousarray(phase)
+                out = out.copy(order='C')
             # normalize by center point value
-            phase /= phase[tuple(i // 2 for i in phase.shape)]
-            np.testing.assert_almost_equal(phase[tuple(i // 2 for i in phase.shape)], 1)
-            return phase
+            out /= out[tuple(i // 2 for i in out.shape)]
+            return out
 
         return key, calc
 
