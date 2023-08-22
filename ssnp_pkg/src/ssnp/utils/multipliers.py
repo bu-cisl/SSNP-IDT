@@ -78,9 +78,10 @@ class Multipliers:
             np.outer(yr, xr, out=out)
 
             if kernel is not None:
-                np.fft.fft2(out, out=out)
-                out *= kernel
-                np.fft.ifft2(out, out=out)
+                out_fourier = np.fft.fft2(out)
+                out_fourier *= kernel
+                out_fourier = np.fft.ifft2(out_fourier)
+                np.copyto(out, out_fourier)
 
             # normalize by center point value
             out /= out[tuple(i // 2 for i in out.shape)]
@@ -245,10 +246,12 @@ if __name__ == '__main__':
 
     from timeit import timeit
 
-    res = (0.25, 0.25)
+    res = (0.25, 0.25, 1)
     xy_size = (2**12, 2**12)
     norm = tuple(xy_size[i] * res[i] for i in (0, 1))  # to be confirmed: * config.n0
-    kernel = None
+
+    kernel = Multipliers(xy_size, res).gaussian(0.5, (0.5, 0.5), gpu=False)
+    kernel = np.fft.fft2(np.fft.fftshift(kernel))
     NA = 0.65
 
     angle = 0.25 * np.pi
@@ -276,9 +279,10 @@ if __name__ == '__main__':
         np.outer(yr, xr, out=out)
 
         if kernel is not None:
-            np.fft.fft2(out, out=out)
-            out *= kernel
-            np.fft.ifft2(out, out=out)
+            out_fourier = np.fft.fft2(out)
+            out_fourier *= kernel
+            out_fourier = np.fft.ifft2(out_fourier)
+            np.copyto(out, out_fourier)
 
         # normalize by center point value
         out /= out[tuple(i // 2 for i in out.shape)]
