@@ -44,9 +44,7 @@ class Multipliers:
     @_cache_array
     def tilt(self, c_ab, *, trunc, periodic_params=None, c_ab_out=None):
         res = self.res
-        shape = self._shape
         xy_size = self._xy_size
-        shape = self._shape
         norm = tuple(xy_size[i] * res[i] for i in (0, 1))  # to be confirmed: * config.n0
         kernel = None
         if trunc:
@@ -61,29 +59,23 @@ class Multipliers:
 
         key = ("t", c_ab, res, None if periodic_params is None else periodic_params[0])
 
-        def calc(out : np.ndarray | None = None):
-
-            if out is None:
-                out = np.empty(shape, dtype=np.complex128)
-
+        def calc():
             xr = np.arange(xy_size[0], dtype=np.complex128)
-            xr.real *= (2 * np.pi * c_ab[0] * norm[0] / xy_size[0])
-            np.sin(xr.real, out=xr.imag)
-            np.cos(xr.real, out=xr.real)
+            xr *= 2j * np.pi * c_ab[0] * norm[0] / xy_size[0]
+            np.exp(xr, out=xr)
 
             yr = np.arange(xy_size[1], dtype=np.complex128)
-            yr.real *= (2 * np.pi * c_ab[1] * norm[1] / xy_size[1])
-            np.sin(yr.real, out=yr.imag)
-            np.cos(yr.real, out=yr.real)
+            yr *= 2j * np.pi * c_ab[1] * norm[1] / xy_size[1]
+            np.exp(yr, out=yr)
 
-            np.outer(yr, xr, out=out)
+            out = np.outer(yr, xr)
 
             if kernel is not None:
-                out_fourier = np.fft.fft2(out)
-                out_fourier *= kernel
-                out_fourier = np.fft.ifft2(out_fourier)
-                np.copyto(out, out_fourier)
-
+                out = np.fft.fft2(out)
+                out *= kernel
+                out = np.fft.ifft2(out)
+                # change fft default f-contiguous output to c-contiguous
+                out = out.copy(order='C')
             # normalize by center point value
             out /= out[tuple(i // 2 for i in out.shape)]
             return out
