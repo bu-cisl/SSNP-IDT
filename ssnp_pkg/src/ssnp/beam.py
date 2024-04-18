@@ -278,7 +278,7 @@ class BeamArray:
         """
         if track is None:
             track = self._track
-        param_check(field=self._u1, multiplier=arr, hold=hold and hold._u1)
+        param_check(field=self._u1, multiplier=arr, hold=None if hold is None else hold._u1)
         if hold is not None:
             self.__isub__(hold)
             self.mul(arr, track=track)
@@ -572,7 +572,7 @@ class BeamArray:
                     u_return = Var(u_in.tag, self._get_array())
                 else:
                     u_return = u_in
-            calc.bpm_step(u_in.data, dz, n_data, u_return.data, self._config, self.stream)
+            calc.bpm_step(u_in.data, dz, n_data, output=u_return.data, config=self._config, stream=self.stream)
             return u_return
 
         def clear():
