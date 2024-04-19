@@ -18,8 +18,8 @@ def pycuda_test():
             warn(f"maybe no available C++ compiler found by nvcc?")
     except ExecError:
         warn(f"maybe nvcc is not in PATH?")
-    except:
-        warn(f"unknown error")
+    except BaseException as e:
+        warn(f"unknown error: {e}")
 
 
 def autoinit():

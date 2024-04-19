@@ -266,7 +266,7 @@ class BeamArray:
     def binary_pupil(self, na):
         self.a_mul(self.multiplier.binary_pupil(na, self._config.n0 if self._config else 1, gpu=True))
 
-    def mul(self, arr, *, hold=None, track=None):
+    def mul(self, arr, *, hold=None):
         """
         calculate ``beam *= arr``
 
@@ -274,14 +274,11 @@ class BeamArray:
 
         :param arr: other array to multiply
         :param hold: some part not perform multiply
-        :param track: track this operation for gradient calculation
         """
-        if track is None:
-            track = self._track
         param_check(field=self._u1, multiplier=arr, hold=None if hold is None else hold._u1)
         if hold is not None:
             self.__isub__(hold)
-            self.mul(arr, track=track)
+            self.mul(arr)
             self.__iadd__(hold)
         else:
             self.__imul__(arr)
@@ -327,7 +324,7 @@ class BeamArray:
             self.tape.append(op)
         return self
 
-    def __iadd__(self, other, sign=1):
+    def __iadd__(self, other, sign=1):  # TODO: check if this is correct for recalculation in gradient computation
         assert isinstance(other, BeamArray)
         param_check(self=self._u1, add=other._u1)
         u_self = (self._u1,) if self._u2 is None else (self._u1, self._u2)
@@ -440,28 +437,28 @@ class BeamArray:
         return loss
 
     def _parse(self, info, dz, n, track):
-        def step(var_dz, var_n):
+        def step(_dz, _n):
             if info[0] == 'bpm':
-                calc.bpm_step(info[1], var_dz, var_n, config=self._config)
+                calc.bpm_step(info[1], _dz, _n, config=self._config)
                 if track:
-                    if var_n is not None and next(self.tape.save_hint):
+                    if _n is not None and next(self.tape.save_hint):
                         u_save = self._get_array()
                         u_save.set(info[1])
                     else:
                         u_save = None
-                    self.tape.append(self._bpm_op(Var('u', u_save), var_n, dz))
+                    self.tape.append(self._bpm_op(Var('u', u_save), _n, _dz))
 
             elif info[0] == 'ssnp':
-                calc.ssnp_step(info[1], info[2], var_dz, var_n, config=self._config)
+                calc.ssnp_step(info[1], info[2], _dz, _n, config=self._config)
                 if track:
-                    if var_n is not None and next(self.tape.save_hint):
+                    if _n is not None and next(self.tape.save_hint):
                         u_save = self._get_array()
                         ud_save = self._get_array()
                         u_save.set_async(info[1], self.stream)
                         ud_save.set_async(info[2], self.stream)
                     else:
                         u_save = ud_save = None
-                    self.tape.append(self._ssnp_op((Var('u', u_save), Var('ud', ud_save)), var_n, dz))
+                    self.tape.append(self._ssnp_op((Var('u', u_save), Var('ud', ud_save)), _n, _dz))
 
         if n is None:
             if isinstance(dz, Iterable):
@@ -511,7 +508,7 @@ class BeamArray:
 
     @contextmanager
     def track(self):
-        if self._track:
+        if old_track := self._track:
             warn("this BeamArray is already tracked")
         else:
             self._track = True
@@ -523,7 +520,7 @@ class BeamArray:
                 v_out.append(Var())
             self.tape.append(self._change_op(v_in, v_out))
         yield
-        self._track = False
+        self._track = old_track
 
     def _a_mul_op(self, other):
         if self._u2 is None:
@@ -545,7 +542,7 @@ class BeamArray:
 
         def gradient(ug_in_data, out: dict = None):
             if n_data is not None:
-                if not u_out:
+                if not u_out.has_data():
                     raise DataMissing
                 if out:
                     if out.get('n', None) is not None:
@@ -576,7 +573,7 @@ class BeamArray:
             return u_return
 
         def clear():
-            if u_out:
+            if u_out.has_data():
                 self.recycle_array(u_out.data)
 
         op = Operation(vars_in, u_out, "bpm")
@@ -585,8 +582,8 @@ class BeamArray:
 
     def _ssnp_op(self, u_out, n_data, dz):
         def gradient(ug_in_data, u_dg_in_data, out: dict = None):
-            if n_data:
-                if not u_out[0]:
+            if n_data is not None:
+                if not u_out[0].has_data():
                     raise DataMissing
                 if out:
                     if out.get('n', None) is not None:
@@ -603,7 +600,7 @@ class BeamArray:
             return (ug_in_data, u_dg_in_data) if ng_data is None else (ug_in_data, u_dg_in_data, ng_data)
 
         def forward(*u_in):
-            if n_data:  # scatter: save in u_out, can reuse mem if not bound
+            if n_data is not None:  # scatter: save in u_out, can reuse mem if not bound
                 for i, ui in enumerate(u_in):
                     u_out[i].data = self._get_array() if ui.bound else ui.data
                 u_return = u_out
@@ -618,7 +615,7 @@ class BeamArray:
 
         def clear():
             for v in u_out:
-                if v:
+                if v.has_data():
                     self.recycle_array(v.data)
 
         vars_in = [Var('u_in'), Var('ud_in')]

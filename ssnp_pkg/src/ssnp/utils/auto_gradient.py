@@ -1,6 +1,9 @@
-from typing import Any, Sequence, List, Union
+from typing import Any, Sequence, List, Union, Optional
 from dataclasses import dataclass, field
+import re
+
 import numpy as np
+from warnings import warn
 
 
 @dataclass
@@ -23,7 +26,12 @@ class Variable:
     external: bool = False
     bound: bool = False
 
+    # Deprecated: confusing to test if data is saved
     def __bool__(self):
+        warn("Variable.__bool__ is deprecated, use Variable.has_data() instead", DeprecationWarning, stacklevel=2)
+        return self.has_data()
+
+    def has_data(self):
         return self.data is not None
 
 
@@ -37,7 +45,7 @@ class Operation:
     vars_out: Union[Variable, Sequence[Variable]]
     name: str = None
     taped_len = None
-    taped_out = None
+    taped_out: Optional[List] = None
 
     # vars_out_saved = True
     # tag_pos = {}
@@ -52,8 +60,6 @@ class Operation:
         for v in self.vars_in:
             v.bound = True
             tl[0] += not v.external
-            # if v.tag:
-            #     self.tag_pos[v.tag] = pos
         for v in self.vars_out:
             v.bound = True
             tl[1] += not v.external
@@ -80,14 +86,13 @@ class Operation:
     def update_taped_out(self):
         self.taped_out = []
         for v in self.vars_out:
-            if not v.external:
-                if v:
-                    self.taped_out.append(v)
-                else:
-                    self.taped_out = None
-                    return
-        if not self.taped_out:
-            self.taped_out = None
+            if v.external:
+                continue
+            if v.has_data():
+                self.taped_out.append(v)
+            else:
+                self.taped_out = None
+                break
 
     def set_funcs(self, forward, gradient, clear=None):
         args = forward, gradient, clear
@@ -116,8 +121,6 @@ class Operation:
 
 
 class OperationTape(list):
-    # tape: List[Operation] = None
-
     class Restart(Exception):
         pass
 
@@ -156,33 +159,36 @@ class OperationTape(list):
             else:  # tag only: list to store output gradients
                 tags_build_list[tag] = []
         taped_grad = []
-        for op_i in reversed(range(len(self))):
-            op = self[op_i]
-            grad_out_tags = [v.tag for v in op.vars_in]
-            out = {tag: next(it) for tag, it in tags_container_iter.items() if tag in grad_out_tags}
-            out.update({tag: None for tag in tags_build_list if tag in grad_out_tags})
+        for op_idx in reversed(range(len(self))):
+            op: Operation = self[op_idx]
+            grad_out_tags = {v.tag for v in op.vars_in if v.tag is not None}
+            grad_out_tags |= {f"{op.name}:{t}" for t in grad_out_tags}
+            out = {re.sub(rf'^{op.name}:', '', tag): next(tags_container_iter[tag])
+                   for tag in grad_out_tags & tags_container_iter.keys()}
+            out.update({re.sub(rf'^{op.name}:', '', tag): None
+                        for tag in grad_out_tags & tags_build_list.keys()})
             kwargs = {"out": out} if out else {}
             try:
                 grad_in_data = op.backprop(*taped_grad, **kwargs)
             except DataMissing as e:
-                last_saved = op_i - 1
+                last_saved = op_idx - 1
                 while not (taped_out := self[last_saved].taped_out):
                     last_saved -= 1
-                for i in range(last_saved, op_i):
+                for i in range(last_saved, op_idx):
                     taped_out = self[i + 1].recalculate(taped_out)
                 try:
                     grad_in_data = op.backprop(*taped_grad, **kwargs)
                 except DataMissing:
-                    raise ValueError("recalculation failed in partial-saved backpropagation") from e
+                    raise ValueError(f"Recalculation of {op} does not provide enough data for its backpropagation")
 
             taped_grad = []
             for data, v in zip(grad_in_data, op.vars_in):
                 if not v.external:
                     taped_grad.append(data)
-                try:
+                if v.tag in tags_build_list:
                     tags_build_list[v.tag].append(data)
-                except KeyError:
-                    pass
+                if (op_var := f"{op.name}:{v.tag}") in tags_build_list:
+                    tags_build_list[op_var].append(data)
             if clear:
                 op.clear()
         if clear:
