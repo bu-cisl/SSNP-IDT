@@ -45,7 +45,8 @@ class Operation:
     vars_out: Union[Variable, Sequence[Variable]]
     name: str = None
     taped_len = None
-    taped_out: Optional[List] = None
+    _taped_out: Optional[List] = field(default=None, init=False, repr=False)
+    _taped_in_all_saved: bool = field(default=False, init=False, repr=False)
 
     # vars_out_saved = True
     # tag_pos = {}
@@ -63,7 +64,7 @@ class Operation:
         for v in self.vars_out:
             v.bound = True
             tl[1] += not v.external
-        self.update_taped_out()
+        self.update_saved()
         self.taped_len = tl
 
     def backprop(self, *grad_out_data, **kwargs):
@@ -73,26 +74,47 @@ class Operation:
             raise ValueError(f"cannot match gradient in Operation('{self.name}') with vars_in numbers")
         return grad_in_data
 
-    def recalculate(self, taped_in):
-        # assert len(vars_in_data) == len(self.vars_in), "vars_in length error"
+    def recalculate(self, taped_in=None):
+        # input param checks
+        taped_in_len = self.taped_len[0]
+        if self.can_self_recalculate():
+            if taped_in is not None:
+                warn(f"op {self} can self recalculate. taped_in is ignored", stacklevel=2)
+            if self._taped_out is not None:
+                return self._taped_out
+            taped_in = [v for v in self.vars_in if not v.external]
+        if taped_in is None:
+            raise ValueError(f"op {self} cannot self recalculate without taped_in")
         if isinstance(taped_in, Variable):
-            taped_out = self.forward(taped_in)
-        else:
-            taped_out = self.forward(*taped_in)
-        self.update_taped_out()
-        # assert len(taped_data) == len(self.vars_out), "vars_out length error"
+            taped_in = [taped_in]
+        assert len(taped_in) == taped_in_len, f"op {self} needs {taped_in_len} taped_in vars but got {len(taped_in)}"
+        # calculation delegated to forward method implementation
+        taped_out = self.forward(*taped_in)
+        self.update_saved()
+        # Note: it is NOT require to store the recalculated data in self.vars_out,
+        # which allows for multiple times recalculation and further reuse of memory.
         return taped_out
 
-    def update_taped_out(self):
-        self.taped_out = []
+    def can_self_recalculate(self):
+        return self._taped_out is not None or self._taped_in_all_saved
+
+    def update_saved(self):
+        """
+        Rebuild the taped_out list of this operation and check if input is all saved.
+        1. If any taped vars_out do not have data stored, set taped_out to None.
+        2. If all taped vars_in are saved, set _is_taped_in_saved to True.
+        :return: None
+        """
+        self._taped_out = []
         for v in self.vars_out:
             if v.external:
                 continue
             if v.has_data():
-                self.taped_out.append(v)
+                self._taped_out.append(v)
             else:
-                self.taped_out = None
+                self._taped_out = None
                 break
+        self._taped_in_all_saved = all([(v.external or v.has_data()) for v in self.vars_in])
 
     def set_funcs(self, forward, gradient, clear=None):
         args = forward, gradient, clear
@@ -170,12 +192,15 @@ class OperationTape(list):
             kwargs = {"out": out} if out else {}
             try:
                 grad_in_data = op.backprop(*taped_grad, **kwargs)
-            except DataMissing as e:
-                last_saved = op_idx - 1
-                while not (taped_out := self[last_saved].taped_out):
-                    last_saved -= 1
-                for i in range(last_saved, op_idx):
-                    taped_out = self[i + 1].recalculate(taped_out)
+            except DataMissing:
+                for prev_idx in reversed(range(op_idx)):
+                    if self[prev_idx].can_self_recalculate():
+                        taped_out = None
+                        break  # find the nearest operation that can self recalculate
+                else:
+                    raise ValueError("No previous Operations can recalculate")
+                for prev_op in self[prev_idx:op_idx + 1]:
+                    taped_out = prev_op.recalculate(taped_out)
                 try:
                     grad_in_data = op.backprop(*taped_grad, **kwargs)
                 except DataMissing:
