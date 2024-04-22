@@ -3,7 +3,7 @@ from pycuda.driver import Stream
 from ssnp.funcs import BPMFuncs, SSNPFuncs, Funcs
 from pycuda.gpuarray import GPUArray
 import numpy as np
-from numbers import Real
+from numbers import Real, Complex
 # from .utils import Multipliers
 from ssnp.utils import Config
 
@@ -48,7 +48,8 @@ def abs_c2c(u: GPUArray, output: GPUArray = None, stream=None): ...
 def get_multiplier(shape, res=None, stream: Stream = None): ...
 
 
-def u_mul(u: GPUArray, mul, copy: bool = False, out=None, stream: Stream = None, conj: bool = False) -> GPUArray: ...
+def u_mul(u: GPUArray, mul: Union[Complex, GPUArray], *,
+          copy: bool = False, out: GPUArray = None, stream: Stream = None, conj: bool = False) -> GPUArray: ...
 
 
 def merge_prop(uf: GPUArray, ub: GPUArray, config: Config = None,

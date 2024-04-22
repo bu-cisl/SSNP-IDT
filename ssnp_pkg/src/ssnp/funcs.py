@@ -144,8 +144,8 @@ class Funcs:
 
     @staticmethod
     @lru_cache
-    def op_krn(batch, xt, yt, zt, operator, name=None, y_func=None):
-        y_i = f"y[i % (n / {batch})]"
+    def _op_krn(batch, xt, yt, zt, operator, name=None, y_func=None):
+        y_i = "y[i]" if batch == 1 else f"y[i % (n / {batch})]"
         if y_func is not None:
             y_i = f"{y_func}({y_i})"
         return elementwise.get_elwise_kernel(
@@ -153,13 +153,13 @@ class Funcs:
             f"z[i] = x[i] {operator} {y_i}",
             name or "op")
 
-    def op(self, x, operator, y, out=None, **kwargs):
+    def op(self, x, operator, y, *, out=None, batchwise=True, **kwargs):
         if out is None:
             out = x
         xt = dtype_to_ctype(x.dtype)
         yt = dtype_to_ctype(y.dtype)
         zt = dtype_to_ctype(out.dtype)
-        func = self.op_krn(self.batch, xt, yt, zt, operator, **kwargs)
+        func = self._op_krn(self.batch if batchwise else 1, xt, yt, zt, operator, **kwargs)
         func.prepared_async_call(x._grid, x._block, self.stream,
                                  x.gpudata, y.gpudata,
                                  out.gpudata, x.mem_size)

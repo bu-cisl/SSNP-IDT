@@ -2,7 +2,7 @@ import numpy as np
 from pycuda import gpuarray
 from ssnp.funcs import BPMFuncs, SSNPFuncs, Funcs
 from ssnp.utils import param_check, config as global_config, Multipliers
-from numbers import Number
+from numbers import Complex
 
 
 def ssnp_step(u, u_d, dz, n=None, output=None, config=None, stream=None):
@@ -132,7 +132,6 @@ def abs_c2c(u, output, stream=None):
     return output
 
 
-
 def get_multiplier(shape, res=None, stream=None):
     # funcs = get_funcs(arr_like, model="any", stream=stream)
     if res is None:
@@ -140,7 +139,7 @@ def get_multiplier(shape, res=None, stream=None):
     return Multipliers(shape, res, stream)
 
 
-def u_mul(u, mul, copy=False, out=None, stream=None, conj=False):
+def u_mul(u, mul, *, copy=False, out=None, stream=None, conj=False):
     funcs = get_funcs(u, model="any", stream=stream)
     if out is None:
         if copy:
@@ -150,25 +149,18 @@ def u_mul(u, mul, copy=False, out=None, stream=None, conj=False):
     else:
         param_check(u=u, out=out)
 
-    if isinstance(mul, Number):
+    if isinstance(mul, Complex):
         if conj:
             mul = mul.conjugate()
         u._axpbz(mul, 0, out, funcs.stream)
-        return out
-
-    # GPUArray * GPUArray
-    if len(u.shape) == 3:
-        if len(mul.shape) == 3:  # rare case: batch * batch, conj will uses temp memory
-            param_check(u=u, mul=mul)
-            if conj:
-                mul = mul.conj()
-            u._elwise_multiply(mul, out, funcs.stream)
-            return out
-        else:
-            param_check(u=u[0], mul=mul)
     else:
-        param_check(u=u, mul=mul)
-    funcs.op(u, '*', mul, out, name='mul', y_func='pycuda::conj' if conj else None)
+        if batchwise := (len(u.shape) != len(mul.shape)):
+            param_check(u_single=u[0], mul=mul)
+        else:
+            param_check(u=u, mul=mul)
+        name = f"mul{'_conj' if conj else ''}{'_batch' if batchwise else ''}"
+        funcs.op(u, '*', mul, out=out,
+                 batchwise=batchwise, name=name, y_func='pycuda::conj' if conj else None)
     return out
 
 
