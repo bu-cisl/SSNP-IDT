@@ -2,7 +2,7 @@ from contextlib import contextmanager
 
 from pycuda.gpuarray import GPUArray
 from pycuda.driver import Stream
-from typing import Literal, Optional, List, Union, Tuple, Iterable
+from typing import Literal, Optional, Union, Iterable
 import numpy as np
 from ssnp.utils import Multipliers, Config
 from ssnp.funcs import Funcs
@@ -28,11 +28,11 @@ class BeamArray:
     field: G_PRO
     derivative: Optional[G_PRO]
     multiplier: Multipliers
-    _array_pool: List[GPUArray, ...]
+    _array_pool: list[GPUArray]
     tape: OperationTape
     ops_number: dict
     _fft_funcs: Funcs
-    batch: int
+    batch: Optional[int]
     stream: Stream
 
     def __init__(self, u1: ARR, u2: ARR = None, relation: Literal[0, 1] = DERIVATIVE, total_ops: int = 0): ...

@@ -1,4 +1,4 @@
-from typing import Any, Sequence, List, Union, Optional
+from typing import Any, Sequence, Union, Optional
 from dataclasses import dataclass, field
 import re
 
@@ -45,7 +45,7 @@ class Operation:
     vars_out: Union[Variable, Sequence[Variable]]
     name: str = None
     taped_len = None
-    _taped_out: Optional[List] = field(default=None, init=False, repr=False)
+    _taped_out: Optional[list[Variable]] = field(default=None, init=False, repr=False)
     _taped_in_all_saved: bool = field(default=False, init=False, repr=False)
 
     # vars_out_saved = True

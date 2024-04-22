@@ -13,6 +13,7 @@ from pycuda.gpuarray import GPUArray
 from ssnp import calc
 from ssnp.utils import param_check, Config
 from ssnp.utils.auto_gradient import Variable as Var, Operation, OperationTape, DataMissing
+from ssnp.ops import MulOp
 import logging
 
 
@@ -44,7 +45,7 @@ class BeamArray:
         self._u1 = to_gpu(u1, "u1")
         shape = self._u1.shape
         if len(shape) == 2:
-            self.batch = 1
+            self.batch = None
         elif len(shape) == 3:
             self.batch = shape[0]
         else:
@@ -288,7 +289,7 @@ class BeamArray:
             track = self._track
         fourier = self._fft_funcs.fourier
         # TODO: have bug and not necessary, removed but can be fixed in future
-        # if self.batch == 1:
+        # if self.batch is None:
         #     param_check(angular_spectrum=self._u1, multiplier=arr, hold=hold and hold._u1)
         # else:
         #     param_check(angular_spectrum=self._u1[0], multiplier=arr)
@@ -306,22 +307,11 @@ class BeamArray:
                 self.tape.append(self._a_mul_op(arr))
 
     def __imul__(self, other):
+        if self._track:
+            self.tape.append(MulOp(other, self))
         calc.u_mul(self._u1, other, stream=self.stream)
         if self._u2 is not None:
             calc.u_mul(self._u2, other, stream=self.stream)
-        if self._track:
-            if self._u2 is None:
-                op = Operation(Var(), Var(), "mul")
-            else:
-                op = Operation((Var(), Var()), (Var(), Var()), "mul2")
-            forward = lambda *u_vars: [
-                Var(data=calc.u_mul(var.data, other,
-                                    out=self._get_array() if var.bound else None,
-                                    stream=self.stream))
-                for var in u_vars]
-            gradient = lambda *ug: [calc.u_mul(i, other, stream=self.stream, conj=True) for i in ug]
-            op.set_funcs(forward, gradient)
-            self.tape.append(op)
         return self
 
     def __iadd__(self, other, sign=1):  # TODO: check if this is correct for recalculation in gradient computation
