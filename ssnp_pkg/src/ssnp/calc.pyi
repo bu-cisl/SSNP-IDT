@@ -1,4 +1,4 @@
-from typing import Tuple, Literal, Union, Optional, Sequence
+from typing import Literal, Union, Optional, Sequence
 from pycuda.driver import Stream
 from ssnp.funcs import BPMFuncs, SSNPFuncs, Funcs
 from pycuda.gpuarray import GPUArray
@@ -10,18 +10,18 @@ from ssnp.utils import Config
 
 def ssnp_step(u: GPUArray, u_d: GPUArray, dz: Real, n: GPUArray = None,
               output: Sequence[Optional[GPUArray], Optional[GPUArray]] = None,
-              config: Config = None, stream: Stream = None) -> Tuple[GPUArray, GPUArray]: ...
+              config: Config = None, stream: Stream = None) -> tuple[GPUArray, GPUArray]: ...
 
 
 def bpm_step(u: GPUArray, dz: Real, n: GPUArray = None, output: GPUArray = None,
              config: Config = None, stream: Stream = None) -> GPUArray: ...
 
 
-def bpm_grad_bp(u: GPUArray, ug: GPUArray, dz: Real, n: GPUArray = None, ng=None,
+def bpm_grad_bp(u: Optional[GPUArray], ug: GPUArray, dz: Real, n: GPUArray = None, ng=None,
                 config: Config = None, stream: Stream = None) -> GPUArray: ...
 
 
-def ssnp_grad_bp(u, ug, u_dg, dz, n=None, ng=None,
+def ssnp_grad_bp(u: Optional[GPUArray], ug: GPUArray, u_dg: Optional[GPUArray], dz: Real, n=None, ng=None,
                  config: Config = None, stream: Stream = None) -> GPUArray: ...
 
 
@@ -53,19 +53,19 @@ def u_mul(u: GPUArray, mul: Union[Complex, GPUArray], *,
 
 
 def merge_prop(uf: GPUArray, ub: GPUArray, config: Config = None,
-               copy: bool = False, stream: Stream = None) -> Tuple[GPUArray, GPUArray]: ...
+               copy: bool = False, stream: Stream = None) -> tuple[GPUArray, GPUArray]: ...
 
 
 def split_prop(u: GPUArray, u_d: GPUArray, config: Config = None,
-               copy: bool = False, stream: Stream = None) -> Tuple[GPUArray, GPUArray]: ...
+               copy: bool = False, stream: Stream = None) -> tuple[GPUArray, GPUArray]: ...
 
 
 def merge_grad(ufg: GPUArray, ubg: GPUArray, config: Config = None,
-               copy: bool = False, stream: Stream = None) -> Tuple[GPUArray, GPUArray]: ...
+               copy: bool = False, stream: Stream = None) -> tuple[GPUArray, GPUArray]: ...
 
 
 def split_grad(ug: GPUArray, u_dg: GPUArray, config: Config = None,
-               copy: bool = False, stream: Stream = None) -> Tuple[GPUArray, GPUArray]: ...
+               copy: bool = False, stream: Stream = None) -> tuple[GPUArray, GPUArray]: ...
 
 
 def get_funcs(arr_like: GPUArray, config: Config = None, *,

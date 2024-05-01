@@ -531,21 +531,20 @@ class BeamArray:
         vars_in = Var('u_in') if n_data is None else (Var('u_in'), Var('n', n_data, external=True))
 
         def gradient(ug_in_data, out: dict = None):
-            if n_data is not None:
+            if n_data is None:
+                calc.bpm_grad_bp(None, ug_in_data, dz, config=self._config, stream=self.stream)
+                return ug_in_data,
+            if out and 'n' in out:
+                # Note: if we don't need ng we don't require u_out to have data
                 if not u_out.has_data():
                     raise DataMissing
-                if out:
-                    if out.get('n', None) is not None:
-                        ng_data = out['n']
-                    else:
-                        logging.info("allocate memory for ng")
-                        ng_data = gpuarray.empty_like(n_data)
-                else:
-                    ng_data = None  # TODO: will raise error if get here. Should fix calc.bpm_grad_bp
+                if (ng_data := out['n']) is None:
+                    logging.info("allocate memory for ng")
+                    ng_data = gpuarray.empty_like(n_data)
             else:
                 ng_data = None
-            calc.bpm_grad_bp(u_out.data, ug_in_data, dz, n_data, ng_data, self._config, self.stream)
-            return (ug_in_data,) if ng_data is None else (ug_in_data, ng_data)
+            calc.bpm_grad_bp(u_out.data, ug_in_data, dz, n_data, ng_data, config=self._config, stream=self.stream)
+            return ug_in_data, ng_data
 
         def forward(u_in: Var):
             if n_data is not None:
@@ -572,22 +571,21 @@ class BeamArray:
 
     def _ssnp_op(self, u_out, n_data, dz):
         def gradient(ug_in_data, u_dg_in_data, out: dict = None):
-            if n_data is not None:
+            if n_data is None:
+                calc.ssnp_grad_bp(None, ug_in_data, u_dg_in_data, dz, config=self._config, stream=self.stream)
+                return ug_in_data, u_dg_in_data
+            if out and 'n' in out:
+                # Note: if we don't need ng we don't require u_out[0] to have data
                 if not u_out[0].has_data():
                     raise DataMissing
-                if out:
-                    if out.get('n', None) is not None:
-                        ng_data = out['n']
-                    else:
-                        logging.info("allocate memory for ng")
-                        ng_data = gpuarray.empty_like(n_data)
-                else:
-                    ng_data = None  # TODO: will raise error if get here. Should fix calc.ssnp_grad_bp
+                if (ng_data := out['n']) is None:
+                    logging.info("allocate memory for ng")
+                    ng_data = gpuarray.empty_like(n_data)
             else:
                 ng_data = None
             calc.ssnp_grad_bp(u_out[0].data, ug_in_data, u_dg_in_data, dz, n_data, ng_data,
                               config=self._config, stream=self.stream)
-            return (ug_in_data, u_dg_in_data) if ng_data is None else (ug_in_data, u_dg_in_data, ng_data)
+            return ug_in_data, u_dg_in_data, ng_data
 
         def forward(*u_in):
             if n_data is not None:  # scatter: save in u_out, can reuse mem if not bound

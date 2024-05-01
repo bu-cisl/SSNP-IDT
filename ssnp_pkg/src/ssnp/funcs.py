@@ -388,6 +388,8 @@ class SSNPFuncs(Funcs):
                 # note: put n as 1st param to get un-batched thread number
                 "double *n_, double2 *u, double2 *ug, double2 *udg, double *n_g",
                 # Forward: ud = ud - temp * u
+                # udg = udg (no change)
+                # ug = ug - udg * temp (temp is real, so we ignore the conj)
                 # ng = Re{-udg * conj(u) * (d_temp(n) / d_n)}
                 f"""
                     temp = {phase_factor} * n_[i] * ({2 * n0} + n_[i]);
@@ -402,7 +404,25 @@ class SSNPFuncs(Funcs):
                 preamble='#include "cuComplex.h"',
                 name="ssnp_qg"
             )
-            new_prop = {"P": p_mat, "Pg": [p_mat[i].conj() for i in (0, 2, 1, 3)], "Q": q_op, "Qg": q_op_g}
+            q_op_g_wo_ng = elementwise.ElementwiseKernel(
+                # note: put n as 1st param to get un-batched thread number
+                "double *n_, double2 *ug, double2 *udg",
+                # Forward: ud = ud - temp * u
+                # udg = udg (no change)
+                # ug = ug - udg * temp (temp is real, so we ignore the conj)
+                f"""
+                    temp = {phase_factor} * n_[i] * ({2 * n0} + n_[i]);
+                    for (j = 0; j < {self.batch}; j++) {{
+                        ug[i + j * n].x -= temp * udg[i + j * n].x;
+                        ug[i + j * n].y -= temp * udg[i + j * n].y;
+                    }}
+                """,
+                loop_prep="double temp; unsigned j",
+                preamble='#include "cuComplex.h"',
+                name="ssnp_qg_wo_ng"
+            )
+            new_prop = {"P": p_mat, "Pg": [p_mat[i].conj() for i in (0, 2, 1, 3)],
+                        "Q": q_op, "Qg": q_op_g, "Qg_wo_ng": q_op_g_wo_ng}
             self._prop_cache[key] = new_prop
             return new_prop
 
@@ -416,7 +436,11 @@ class SSNPFuncs(Funcs):
         self._fused_mam_callable_krn(ag, a_dg, *self._get_prop(dz)["Pg"], stream=self.stream)
 
     def scatter_g(self, u, n, ug, u_dg, ng, dz):
-        self._get_prop(dz)["Qg"](n, u, ug, u_dg, ng, stream=self.stream)  # put n as 1st param (match CUDA code)
+        # note that the position of u and n is swapped to match the CUDA kernel
+        if ng is None:
+            self._get_prop(dz)["Qg_wo_ng"](n, ug, u_dg, stream=self.stream)
+        else:
+            self._get_prop(dz)["Qg"](n, u, ug, u_dg, ng, stream=self.stream)
 
     def merge_prop(self, af, ab):
         self._merge_prop_krn(af, ab, self.kz_gpu, stream=self.stream)
@@ -457,6 +481,9 @@ class BPMFuncs(Funcs):
                 preamble='#include "cuComplex.h"'
             )
             q_op_g = elementwise.ElementwiseKernel(
+                # Forward: u *= exp(I * n * phase_factor)
+                # ug *= exp(-I * n * phase_factor)
+                # ng = Re{-I * phase_factor * conj(u) * ug} = (Re(u) * Im(ug) - Im(u) * Re(ug)) * phase_factor
                 "double2 *u, double *n_, double2 *ug, double *n_g",
                 # Forward: u=u*temp
                 f"""
@@ -467,9 +494,19 @@ class BPMFuncs(Funcs):
                     ug[i] = cuCmul(ug[i], temp_conj);
                 """,
                 loop_prep="double2 temp_conj; double ni",
-                preamble='#include "cuComplex.h"'
+                preamble='#include "cuComplex.h"',
+                name='bpm_qg'
             )
-            new_prop = {"P": p_mat, "Pg": p_mat.conj(), "Q": q_op, "Qg": q_op_g}
+            q_op_g_wo_ng = elementwise.ElementwiseKernel(
+                # Forward: u *= exp(I * n * phase_factor)
+                # ug *= exp(-I * n * phase_factor)
+                "double *n_, pycuda::complex<double> *ug",
+                f"""
+                    ug[i] *= exp(pycuda::complex<double>(0, -{phase_factor} * n_[i % (n / {self.batch})]));
+                """,
+                name='bpm_qg_wo_ng'
+            )
+            new_prop = {"P": p_mat, "Pg": p_mat.conj(), "Q": q_op, "Qg": q_op_g, "Qg_wo_ng": q_op_g_wo_ng}
             self._prop_cache[key] = new_prop
             return new_prop
 
@@ -487,4 +524,7 @@ class BPMFuncs(Funcs):
         self._get_prop(dz)["Q"](u, n, stream=self.stream)
 
     def scatter_g(self, u, n, ug, ng, dz):
-        self._get_prop(dz)["Qg"](u, n, ug, ng, stream=self.stream)
+        if ng is None:
+            self._get_prop(dz)["Qg_wo_ng"](n, ug, stream=self.stream)
+        else:
+            self._get_prop(dz)["Qg"](u, n, ug, ng, stream=self.stream)
