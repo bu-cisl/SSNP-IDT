@@ -1,5 +1,6 @@
 import logging
 from numbers import Complex
+from contextlib import nullcontext
 
 from pycuda import gpuarray
 
@@ -25,7 +26,10 @@ class MulOp(Operation):
 
     def forward(self, *vars_in):
         return [
-            Var(data=calc.u_mul(vin.data, self._other, out=self._beam._get_array(), stream=self._beam.stream))
+            Var(data=calc.u_mul(
+                vin.data, self._other, stream=self._beam.stream,
+                out=self._beam._get_array() if vin.bound else vin.data
+            ))
             for vin in vars_in
         ]
 
@@ -82,3 +86,20 @@ class MulOp(Operation):
         if self._bi_dir:
             if (u2_save := self.vars_in[1].data) is not None:
                 self._beam.recycle_array(u2_save)
+
+
+class FourierMulOp(MulOp):
+    def __init__(self, other, beam):
+        super().__init__(other, beam)
+        self.name = "a_mul" if not self._bi_dir else "a_mul2"
+        self._fourier = beam._fft_funcs.fourier
+
+    def forward(self, *vars_in):
+        with self._fourier(vars_in[0].data), self._fourier(vars_in[1].data) if self._bi_dir else nullcontext():
+            return super().forward(*vars_in)
+
+    def gradient(self, *ug_list, out=None):
+        # Always makes sure that the GPU memory is reused in the overridden super class method
+        # otherwise iFFT is not applied to the result
+        with self._fourier(ug_list[0]), self._fourier(ug_list[1]) if self._bi_dir else nullcontext():
+            return super().gradient(*ug_list, out=out)

@@ -13,7 +13,7 @@ from pycuda.gpuarray import GPUArray
 from ssnp import calc
 from ssnp.utils import param_check, Config
 from ssnp.utils.auto_gradient import Variable as Var, Operation, OperationTape, DataMissing
-from ssnp.ops import MulOp
+from ssnp.ops import MulOp, FourierMulOp
 import logging
 
 
@@ -284,27 +284,26 @@ class BeamArray:
         else:
             self.__imul__(arr)
 
-    def a_mul(self, arr, hold=None, track=None):
-        if track is None:
-            track = self._track
-        fourier = self._fft_funcs.fourier
+    def a_mul(self, arr, hold=None):
         # TODO: have bug and not necessary, removed but can be fixed in future
         # if self.batch is None:
         #     param_check(angular_spectrum=self._u1, multiplier=arr, hold=hold and hold._u1)
         # else:
         #     param_check(angular_spectrum=self._u1[0], multiplier=arr)
         if hold is not None:
+            warn("argument 'hold' is deprecated and cannot be tracked correctly", DeprecationWarning, stacklevel=2)
             self.__isub__(hold)
-            self.a_mul(arr, track=track)
+            self.a_mul(arr)
             self.__iadd__(hold)
-        else:
-            with fourier(self._u1):
-                calc.u_mul(self._u1, arr, stream=self.stream)
-            if self._u2 is not None:
-                with fourier(self._u2):
-                    calc.u_mul(self._u2, arr, stream=self.stream)
-            if track:
-                self.tape.append(self._a_mul_op(arr))
+            return
+        if self._track:
+            self.tape.append(FourierMulOp(arr, self))
+        fourier = self._fft_funcs.fourier
+        with fourier(self._u1):
+            calc.u_mul(self._u1, arr, stream=self.stream)
+        if self._u2 is not None:
+            with fourier(self._u2):
+                calc.u_mul(self._u2, arr, stream=self.stream)
 
     def __imul__(self, other):
         if self._track:
@@ -511,21 +510,6 @@ class BeamArray:
             self.tape.append(self._change_op(v_in, v_out))
         yield
         self._track = old_track
-
-    def _a_mul_op(self, other):
-        if self._u2 is None:
-            op = Operation(Var(), Var(), "a_mul")
-        else:
-            op = Operation((Var(), Var()), (Var(), Var()), "a_mul2")
-
-        def gradient(*ug_list):
-            for ug in ug_list:
-                with self._fft_funcs.fourier(ug) as ag:
-                    calc.u_mul(ag, other, stream=self.stream, conj=True)
-            return ug_list
-
-        op.set_funcs(None, gradient)
-        return op
 
     def _bpm_op(self, u_out, n_data, dz):
         vars_in = Var('u_in') if n_data is None else (Var('u_in'), Var('n', n_data, external=True))
