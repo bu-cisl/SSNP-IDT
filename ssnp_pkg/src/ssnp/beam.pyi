@@ -1,8 +1,9 @@
 from contextlib import contextmanager
+from numbers import Real
 
 from pycuda.gpuarray import GPUArray
 from pycuda.driver import Stream
-from typing import Literal, Optional, Union, Iterable
+from typing import Literal, Optional, Union, Iterable, Sequence
 import numpy as np
 from ssnp.utils import Multipliers, Config
 from ssnp.funcs import Funcs
@@ -37,11 +38,11 @@ class BeamArray:
 
     def __init__(self, u1: ARR, u2: ARR = None, relation: Literal[0, 1] = DERIVATIVE, total_ops: int = 0): ...
 
-    def _parse(self, info, dz, n, track: bool): ...
+    def _parse(self, info, dz, n, track: bool, *, prop_offset: Union[Real, Sequence[Real]] = None): ...
 
     def ssnp(self, dz, n: GPUArray = None, *, track: bool = False): ...
 
-    def bpm(self, dz, n: GPUArray = None, *, track: bool = False): ...
+    def bpm(self, dz, n: GPUArray = None, *, prop_offset: Union[Real, Sequence[Real]] = None, track: bool = False): ...
 
     def forward_mse_loss(self, measurement: GPUArray): ...
 

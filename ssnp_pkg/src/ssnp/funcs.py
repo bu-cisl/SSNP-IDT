@@ -1,5 +1,4 @@
 from pycuda import elementwise, gpuarray, reduction
-from pycuda.gpuarray import GPUArray
 from pycuda.tools import dtype_to_ctype
 import numpy as np
 from ssnp.utils import Multipliers, get_stream_in_current
@@ -458,17 +457,22 @@ class SSNPFuncs(Funcs):
 class BPMFuncs(Funcs):
     _funcs_cache = {}
 
-    def _get_prop(self, dz):
+    def _get_prop(self, dz, prop_offset=None):
         res = self.res
         n0 = self.n0
-        key = (round(dz * 1000), "bpm")
+        # sanitize prop_offset
+        if prop_offset is None:
+            prop_offset = (0., 0.)
+        else:
+            prop_offset = tuple([float(i) for i in prop_offset])
+        key = (round(dz, 3), prop_offset, "bpm")
         try:
             return self._prop_cache[key]
         except KeyError:
-            kz = self.kz.astype(np.complex128)
-            eva = self.eva
-            p_mat = np.exp(kz * (1j * dz))
-            p_mat = gpuarray.to_gpu(p_mat * eva)
+            c_gamma = self.multiplier.c_gamma(shift=prop_offset, gpu=False)
+            # Note: p_mat = exp(2 Pi I * z / lambda) * eva
+            p_mat = np.exp(c_gamma * (2j * np.pi * res[2] * dz)) * np.exp(np.minimum((c_gamma - 0.2) * 5, 0))
+            p_mat = gpuarray.to_gpu(p_mat)
             phase_factor = 2 * np.pi * res[2] / n0 * dz
             q_op = elementwise.ElementwiseKernel(
                 "double2 *u, double *n_",
@@ -506,19 +510,15 @@ class BPMFuncs(Funcs):
                 """,
                 name='bpm_qg_wo_ng'
             )
-            new_prop = {"P": p_mat, "Pg": p_mat.conj(), "Q": q_op, "Qg": q_op_g, "Qg_wo_ng": q_op_g_wo_ng}
+            new_prop = {"P": p_mat, "Q": q_op, "Qg": q_op_g, "Qg_wo_ng": q_op_g_wo_ng}
             self._prop_cache[key] = new_prop
             return new_prop
 
-    def diffract(self, a, dz):  # todo: test it
-        self.op(a, "*", self._get_prop(dz)["P"])
-        # a._elwise_multiply(self._get_prop(dz)["P"], a, stream=self.stream)
-        # a *= self._get_prop(dz)["P"]
+    def diffract(self, a, dz, prop_offset=None):  # todo: test it
+        self.op(a, "*", self._get_prop(dz, prop_offset)["P"], name="bpm_diffract")
 
-    def diffract_g(self, ag, dz):
-        self.op(ag, "*", self._get_prop(dz)["Pg"])
-        # ag._elwise_multiply(self._get_prop(dz)["Pg"], ag, stream=self.stream)
-        # ag *= self._get_prop(dz)["Pg"]
+    def diffract_g(self, ag, dz, prop_offset=None):
+        self.op(ag, "*", self._get_prop(dz, prop_offset)["P"], y_func='pycuda::conj', name="bpm_diffract_g")
 
     def scatter(self, u, n, dz):
         self._get_prop(dz)["Q"](u, n, stream=self.stream)

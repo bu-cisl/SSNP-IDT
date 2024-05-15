@@ -13,8 +13,8 @@ def ssnp_step(u: GPUArray, u_d: GPUArray, dz: Real, n: GPUArray = None,
               config: Config = None, stream: Stream = None) -> tuple[GPUArray, GPUArray]: ...
 
 
-def bpm_step(u: GPUArray, dz: Real, n: GPUArray = None, output: GPUArray = None,
-             config: Config = None, stream: Stream = None) -> GPUArray: ...
+def bpm_step(u: GPUArray, dz: Real, n: GPUArray = None, *, prop_offset: Sequence[Real] = None,
+             output: GPUArray = None, config: Config = None, stream: Stream = None) -> GPUArray: ...
 
 
 def bpm_grad_bp(u: Optional[GPUArray], ug: GPUArray, dz: Real, n: GPUArray = None, ng=None,

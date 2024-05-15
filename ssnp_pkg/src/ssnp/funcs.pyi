@@ -1,4 +1,5 @@
-from typing import Literal, Dict
+from numbers import Real
+from typing import Literal, Sequence
 
 import numpy as np
 from pycuda.gpuarray import GPUArray
@@ -10,7 +11,7 @@ from .utils import Multipliers
 
 
 class Funcs:
-    _funcs_cache: Dict[tuple, Funcs]
+    _funcs_cache: dict[tuple, Funcs]
     shape: tuple
     batch: int
     res: tuple
@@ -86,11 +87,11 @@ class Funcs:
 
 
 class BPMFuncs(Funcs):
-    def _get_prop(self, dz): ...
+    def _get_prop(self, dz, prop_offset: Sequence[Real] = None): ...
 
-    def diffract(self, a: GPUArray, dz) -> None: ...
+    def diffract(self, a: GPUArray, dz, prop_offset=None) -> None: ...
 
-    def diffract_g(self, ag, dz): ...
+    def diffract_g(self, ag, dz, prop_offset=None): ...
 
     def scatter(self, u, n, dz) -> None: ...
 

@@ -83,14 +83,20 @@ class Multipliers:
         return key, calc
 
     @_cache_array
-    def binary_pupil(self, na, n0=1):
+    def binary_pupil(self, na, n0=1, prop_offset=None):
         res = self.res
-        c_gamma = self.c_gamma()
         na /= n0  # NA = n0 sin(gamma), use NA' = NA/n0 to make the mask formula the same as air
-        key = ("bp", round(na, 4), res)
+
+        # sanitize prop_offset
+        if prop_offset is None:
+            prop_offset = (0., 0.)
+        else:
+            prop_offset = tuple([float(i) for i in prop_offset])
+
+        key = ("bp", round(na, 4), res, prop_offset)
 
         def calc():
-            mask = np.greater(c_gamma, np.sqrt(1 - na ** 2))
+            mask = np.greater(self.c_gamma(shift=prop_offset), np.sqrt(1 - na ** 2))
             mask = mask.astype(np.complex128)
             return mask
 

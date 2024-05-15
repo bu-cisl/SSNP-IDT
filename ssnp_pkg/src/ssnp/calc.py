@@ -37,13 +37,14 @@ def ssnp_step(u, u_d, dz, n=None, output=None, config=None, stream=None):
     return u, u_d
 
 
-def bpm_step(u, dz, n=None, output=None, config=None, stream=None):
+def bpm_step(u, dz, n=None, *, prop_offset=None, output=None, config=None, stream=None):
     """
     BPM main operation of one step
 
     :param u: x-y complex amplitude
     :param dz: step size along z axis
     :param n: refractive index along x-y distribution in this slice. Use background N0 if not provided.
+    :param prop_offset: extra tilt amount of the wave vector direction
     :param output:
     :param config:
     :param stream:
@@ -56,7 +57,7 @@ def bpm_step(u, dz, n=None, output=None, config=None, stream=None):
         param_check(u=u, n=n, output=output)
     funcs: BPMFuncs = get_funcs(u, config, model="bpm", stream=stream)
     a = funcs.fft(u, output=output)
-    funcs.diffract(a, dz)
+    funcs.diffract(a, dz, prop_offset)
     u = funcs.ifft(a)
     if n is not None:
         funcs.scatter(u, n, dz)

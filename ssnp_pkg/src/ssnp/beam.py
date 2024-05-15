@@ -244,10 +244,11 @@ class BeamArray:
         self.merge_prop()
         self._parse(('ssnp', self._u1, self._u2), dz, n, track)
 
-    def bpm(self, dz, n=None, *, track=None):
+    def bpm(self, dz, n=None, *, prop_offset=None, track=None):
         """
         Perform a BPM operation for this beam array
 
+        :param prop_offset: frequency offset of propagation
         :param dz: z slice thickness, unit: z pixel size
         :param n: refractive index, default is background n0
         :param track: track this operation for gradient calculation
@@ -258,7 +259,7 @@ class BeamArray:
         if self._u2 is not None:
             warn("discarding backward propagation part of bidirectional field", stacklevel=2)
             self.backward = None
-        self._parse(('bpm', self._u1), dz, n, track)
+        self._parse(('bpm', self._u1), dz, n, track, prop_offset=prop_offset)
 
     def n_grad(self, output=None):
         self.tape.collect_gradient({'n': output})
@@ -425,11 +426,13 @@ class BeamArray:
         self.recycle_array(summed_abs)
         return loss
 
-    def _parse(self, info, dz, n, track):
+    def _parse(self, info, dz, n, track, *, prop_offset=None):
         def step(_dz, _n):
             if info[0] == 'bpm':
-                calc.bpm_step(info[1], _dz, _n, config=self._config)
+                calc.bpm_step(info[1], _dz, _n, config=self._config, prop_offset=prop_offset)
                 if track:
+                    if prop_offset is not None:
+                        raise NotImplementedError("prop_offset is not supported in tracking for gradient mode")
                     if _n is not None and next(self.tape.save_hint):
                         u_save = self._get_array()
                         u_save.set(info[1])
