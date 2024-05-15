@@ -83,7 +83,7 @@ class Multipliers:
         return key, calc
 
     @_cache_array
-    def binary_pupil(self, na, n0=1, prop_offset=None):
+    def binary_pupil(self, na, n0=1, *, prop_offset=None):
         res = self.res
         na /= n0  # NA = n0 sin(gamma), use NA' = NA/n0 to make the mask formula the same as air
 
