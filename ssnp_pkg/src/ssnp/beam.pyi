@@ -4,7 +4,7 @@ from pycuda.gpuarray import GPUArray
 from pycuda.driver import Stream
 from typing import Literal, Optional, Union, Iterable
 import numpy as np
-from ssnp.utils import Multipliers, Config
+from ssnp.utils import Multipliers, Config, ArrayPool
 from ssnp.funcs import Funcs
 from ssnp.utils.auto_gradient import OperationTape, Variable
 
@@ -20,7 +20,6 @@ class BeamArray:
     _config: Optional[Config]
     _track: bool
     config: Union[Config, property]
-    _get_array_times: int
     _u1: GPUArray
     _u2: Optional[GPUArray]
     forward: G_PRO
@@ -28,7 +27,7 @@ class BeamArray:
     field: G_PRO
     derivative: Optional[G_PRO]
     multiplier: Multipliers
-    _array_pool: list[GPUArray]
+    array_pool: ArrayPool
     tape: OperationTape
     ops_number: dict
     _fft_funcs: Funcs
@@ -76,10 +75,6 @@ class BeamArray:
     def split_prop(self): ...
 
     def merge_prop(self): ...
-
-    def _get_array(self) -> GPUArray: ...
-
-    def recycle_array(self, arr: GPUArray): ...
 
     def apply_grad(self, grad1: GPUArray, grad2: GPUArray = None): ...
 
