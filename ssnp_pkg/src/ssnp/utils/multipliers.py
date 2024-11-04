@@ -90,7 +90,14 @@ class Multipliers:
         key = ("bp", round(na, 4), res)
 
         def calc():
-            mask = np.greater(c_gamma, np.sqrt(1 - na ** 2))
+            # We usually expect binary_pupil is symmetric and fft(binary_pupil) is real,
+            # so softmax (sigmoid) is used here to reduce the floating error rather than the bare max.
+            # softmax: exp(a - b) / (1 + exp(a - b)), multiply 10000 to make it "very hard"
+
+            # mask = np.greater(c_gamma, np.sqrt(1 - na ** 2))
+            mask = c_gamma - np.sqrt(1 - na ** 2)
+            mask = np.exp(np.minimum(mask, 0.01) * 10000)
+            mask /= 1 + mask
             mask = mask.astype(np.complex128)
             return mask
 
