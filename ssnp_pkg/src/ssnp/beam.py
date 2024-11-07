@@ -428,17 +428,17 @@ class BeamArray:
     def _parse(self, info, dz, n, track):
         def step(_dz, _n):
             if info[0] == 'bpm':
-                calc.bpm_step(info[1], _dz, _n, config=self._config)
+                calc.bpm_step(info[1], _dz, _n, config=self._config, stream=self.stream)
                 if track:
                     if _n is not None and next(self.tape.save_hint):
                         u_save = self._get_array()
-                        u_save.set(info[1])
+                        u_save.set_async(info[1], self.stream)
                     else:
                         u_save = None
                     self.tape.append(self._bpm_op(Var('u', u_save), _n, _dz))
 
             elif info[0] == 'ssnp':
-                calc.ssnp_step(info[1], info[2], _dz, _n, config=self._config)
+                calc.ssnp_step(info[1], info[2], _dz, _n, config=self._config, stream=self.stream)
                 if track:
                     if _n is not None and next(self.tape.save_hint):
                         u_save = self._get_array()
