@@ -27,9 +27,9 @@ jobs:
     - name: Build wheel
       run: |
           pip install build
-          python -m build -w .
-          echo "wheel_name=ssnp-${{ github.ref }}-py3-none-any.whl" >> $GITHUB_ENV
+          python -m build -w ssnp_pkg
+          echo "wheel_name=ssnp-${{ github.ref_name }}-py3-none-any.whl" >> $GITHUB_ENV
     - name: Release
       uses: softprops/action-gh-release@v2
       with:
-          files: ./dist/${{ env.wheel_name }}
+          files: ./ssnp_pkg/dist/${{ env.wheel_name }}
