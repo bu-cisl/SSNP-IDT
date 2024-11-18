@@ -5,12 +5,11 @@ from pycuda.gpuarray import GPUArray
 from pycuda.elementwise import ElementwiseKernel
 from pycuda.driver import Stream, Function
 from pycuda.reduction import ReductionKernel
-from reikna.core.computation import ComputationCallable
 from .utils import Multipliers
 
 
 class Funcs:
-    _funcs_cache: Dict[tuple, Funcs]
+    _initialized: bool
     shape: tuple
     batch: int
     res: tuple
@@ -20,7 +19,6 @@ class Funcs:
     kz_gpu: GPUArray
     eva: np.ndarray
     multiplier: Multipliers
-    _fft_callable: ComputationCallable
     # __temp_memory_pool: dict
     _prop_cache: dict
     reduce_sse_cr_krn: ReductionKernel
@@ -37,8 +35,6 @@ class Funcs:
 
     def __init__(self, arr_like: GPUArray, res, n0, stream: Stream = None,
                  fft_type: Literal["reikna", "skcuda"] = "skcuda"): ...
-
-    def _initialized(self) -> bool: ...
 
     @staticmethod
     def _compile_reikna_fft(shape, dtype, stream): ...
@@ -60,9 +56,6 @@ class Funcs:
     def scatter_g(self, *args) -> None: ...
 
     def _get_prop(self, dz): ...
-
-    # @staticmethod
-    # def get_temp_mem(arr_like: GPUArray, index=0): ...
 
     def reduce_sse(self, field: GPUArray, measurement: GPUArray) -> GPUArray: ...
 

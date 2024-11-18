@@ -8,68 +8,75 @@ from functools import partial, lru_cache
 from skcuda import fft as skfft
 import logging
 
+_funcs_cache = {}
+_generic_funcs = {
+    'reduce_sse_cr_krn': lambda: reduction.ReductionKernel(
+        dtype_out=np.double, neutral=0,
+        reduce_expr="a+b",
+        map_expr="(cuCabs(x[i]) - y[i]) * (cuCabs(x[i]) - y[i])",
+        arguments="double2 *x, double *y",
+        preamble='#include "cuComplex.h"'
+    ),
+    'reduce_sse_cc_krn': lambda: reduction.ReductionKernel(
+        dtype_out=np.double, neutral=0,
+        reduce_expr="a+b",
+        map_expr="cuCabs(cuCsub(x[i], y[i])) * cuCabs(cuCsub(x[i], y[i]))",
+        arguments="double2 *x, double2 *y",
+        preamble='#include "cuComplex.h"'
+    ),
+    'mse_cc_grad_krn': lambda: elementwise.ElementwiseKernel(
+        "double2 *u, double2 *m, double2 *out",
+        """
+        out[i] = cuCsub(u[i], m[i]);
+        out[i].x *= 2. / (double)n; out[i].y *= 2. / (double)n;
+        """,
+        preamble='#include "cuComplex.h"'
+    ),
+    'mse_cr_grad_krn': lambda: elementwise.ElementwiseKernel(
+        "double2 *u, double *m, double2 *out",
+        """
+        temp = 2 * (1 - m[i] / cuCabs(u[i]));
+        if (!isfinite(temp))
+            temp = (double)0;
+        out[i].x = temp * u[i].x / (double)n; out[i].y = temp * u[i].y / (double)n;
+        """,
+        loop_prep="double temp",
+        preamble='#include "cuComplex.h"'
+    ),
+    'abs_cc_krn': lambda: elementwise.ElementwiseKernel(
+        "double2 *x, double2 *out",
+        "out[i] = make_cuDoubleComplex(cuCabs(x[i]), 0)",
+        preamble='#include "cuComplex.h"'
+    )
+}
+
 
 class Funcs:
-    # __temp_memory_pool = {}
-    _funcs_cache = {}
-    reduce_sse_cr_krn = None
+    _initialized = False
 
     def __new__(cls, arr_like, res, n0, stream=None, fft_type="skcuda"):
-        if cls.reduce_sse_cr_krn is None:
-            Funcs.reduce_sse_cr_krn = reduction.ReductionKernel(
-                dtype_out=np.double, neutral=0,
-                reduce_expr="a+b",
-                map_expr="(cuCabs(x[i]) - y[i]) * (cuCabs(x[i]) - y[i])",
-                arguments="double2 *x, double *y",
-                preamble='#include "cuComplex.h"'
-            )
-            Funcs.reduce_sse_cc_krn = reduction.ReductionKernel(
-                dtype_out=np.double, neutral=0,
-                reduce_expr="a+b",
-                map_expr="cuCabs(cuCsub(x[i], y[i])) * cuCabs(cuCsub(x[i], y[i]))",
-                arguments="double2 *x, double2 *y",
-                preamble='#include "cuComplex.h"'
-            )
-            Funcs.mse_cc_grad_krn = elementwise.ElementwiseKernel(
-                "double2 *u, double2 *m, double2 *out",
-                """
-                out[i] = cuCsub(u[i], m[i]);
-                out[i].x *= 2. / (double)n; out[i].y *= 2. / (double)n;
-                """,
-                preamble='#include "cuComplex.h"'
-            )
-            Funcs.mse_cr_grad_krn = elementwise.ElementwiseKernel(
-                "double2 *u, double *m, double2 *out",
-                """
-                temp = 2 * (1 - m[i] / cuCabs(u[i]));
-                if (!isfinite(temp))
-                    temp = (double)0;
-                out[i].x = temp * u[i].x / (double)n; out[i].y = temp * u[i].y / (double)n;
-                """,
-                loop_prep="double temp",
-                preamble='#include "cuComplex.h"'
-            )
-            Funcs.abs_cc_krn = elementwise.ElementwiseKernel(
-                "double2 *x, double2 *out",
-                "out[i] = make_cuDoubleComplex(cuCabs(x[i]), 0)",
-                preamble='#include "cuComplex.h"'
-            )
-
         if res is not None:
-            res = tuple(round(res_i * 1e12) for res_i in res)
+            res = tuple(round(res_i, 12) for res_i in res)
         if n0 is not None:
-            n0 = round(n0 * 1e12)
-        key = (tuple(arr_like.shape), arr_like.dtype, res, n0, stream, fft_type)
+            n0 = round(n0, 12)
+        key = (cls, tuple(arr_like.shape), arr_like.dtype, res, n0, stream, fft_type)
         try:
-            return cls._funcs_cache[key]
+            return _funcs_cache[key]
         except KeyError:
-            cls._funcs_cache[key] = super().__new__(cls)
-            return cls._funcs_cache[key]
+            _funcs_cache[key] = super().__new__(cls)
+            return _funcs_cache[key]
+
+    def __getattr__(self, item):
+        if item in _generic_funcs:
+            funcs_item = _generic_funcs[item]()
+            setattr(Funcs, item, funcs_item)  # lazy load and cache globally
+            return funcs_item
+        raise AttributeError(f"'{type(self).__name__}' has no attribute {item}")
 
     def __init__(self, arr_like, res, n0, stream=None, fft_type="skcuda"):
-        if self._initialized():
+        if self._initialized:
             return
-        self._funcs_cache = None  # only used for mark `self` as initialized
+        self._initialized = True
 
         if stream is None:
             stream = get_stream_in_current()
@@ -139,9 +146,6 @@ class Funcs:
             loop_prep="unsigned j",
         )
 
-    def _initialized(self):
-        return self._funcs_cache is None
-
     @staticmethod
     @lru_cache
     def _op_krn(batch, xt, yt, zt, operator, name=None, y_func=None):
@@ -168,17 +172,17 @@ class Funcs:
     def reduce_sse(self, field, measurement):
         if field.dtype == np.complex128:
             if measurement.dtype == np.float64:
-                return Funcs.reduce_sse_cr_krn(field, measurement, stream=self.stream)
+                return self.reduce_sse_cr_krn(field, measurement, stream=self.stream)
             elif measurement.dtype == np.complex128:
-                return Funcs.reduce_sse_cc_krn(field, measurement, stream=self.stream)
+                return self.reduce_sse_cc_krn(field, measurement, stream=self.stream)
         raise TypeError(f"incompatible dtype: field {field.dtype}, measurement {measurement.dtype}")
 
     def mse_grad(self, field, measurement, gradient):
         if field.dtype == np.complex128 and gradient.dtype == np.complex128:
             if measurement.dtype == np.float64:
-                return Funcs.mse_cr_grad_krn(field, measurement, gradient, stream=self.stream)
+                return self.mse_cr_grad_krn(field, measurement, gradient, stream=self.stream)
             elif measurement.dtype == np.complex128:
-                return Funcs.mse_cc_grad_krn(field, measurement, gradient, stream=self.stream)
+                return self.mse_cc_grad_krn(field, measurement, gradient, stream=self.stream)
         raise TypeError(f"incompatible dtype: field {field.dtype}, measurement {measurement.dtype}, "
                         f"gradient {gradient.dtype}")
 
@@ -267,22 +271,10 @@ class Funcs:
                                  arr.gpudata, out.gpudata, arr.mem_size)
         return out
 
-    # @staticmethod
-    # def get_temp_mem(arr_like: GPUArray, index=0):
-    #     key = (arr_like.shape, arr_like.dtype, index)
-    #     try:
-    #         return Funcs.__temp_memory_pool[key]
-    #     except KeyError:
-    #         mem = gpuarray.empty_like(arr_like)
-    #         Funcs.__temp_memory_pool[key] = mem
-    #         return mem
-
 
 class SSNPFuncs(Funcs):
-    _funcs_cache = {}
-
     def __init__(self, *args, **kwargs):
-        if self._initialized():
+        if self._initialized:
             return
         super(SSNPFuncs, self).__init__(*args, **kwargs)
         self._fused_mam_callable_krn = elementwise.ElementwiseKernel(
@@ -456,8 +448,6 @@ class SSNPFuncs(Funcs):
 
 
 class BPMFuncs(Funcs):
-    _funcs_cache = {}
-
     def _get_prop(self, dz):
         res = self.res
         n0 = self.n0
