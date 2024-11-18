@@ -14,7 +14,7 @@ class Funcs:
     _funcs_cache = {}
     reduce_sse_cr_krn = None
 
-    def __new__(cls, arr_like, res, n0, stream=None, fft_type="reikna"):
+    def __new__(cls, arr_like, res, n0, stream=None, fft_type="skcuda"):
         if cls.reduce_sse_cr_krn is None:
             Funcs.reduce_sse_cr_krn = reduction.ReductionKernel(
                 dtype_out=np.double, neutral=0,
