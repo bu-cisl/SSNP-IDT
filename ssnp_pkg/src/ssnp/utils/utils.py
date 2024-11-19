@@ -39,21 +39,20 @@ class Config:
     _n0 = 1.
     _xyz = None
     _lambda = None
-    _callbacks = None
 
     def __init__(self):
-        self.clear_updater()
+        self._callbacks = []
 
     @property
     def xyz(self):
         if self._xyz is None:
-            raise AttributeError("xyz is uninitialized")
+            raise AttributeError("xyz pixel sizes are uninitialized")
         return self._xyz
 
     @property
     def lambda0(self):
         if self._lambda is None:
-            raise AttributeError("wave length is uninitialized")
+            raise AttributeError("wavelength lambda0 is uninitialized")
         return self._lambda
 
     @property
@@ -78,8 +77,9 @@ class Config:
 
     @xyz.setter
     def xyz(self, value):
-        self._xyz = tuple(float(size_i) for size_i in value)
-        assert len(self._xyz) == 3
+        value = tuple(float(size_i) for size_i in value)
+        assert len(value) == 3
+        self._xyz = value
         self._try_calc_res()
 
     @lambda0.setter
@@ -115,7 +115,7 @@ class Config:
             self._callbacks.append(updater)
 
     def clear_updater(self):
-        self._callbacks = []
+        self._callbacks.clear()
 
     def _update(self, **kwargs):
         for i in self._callbacks:
