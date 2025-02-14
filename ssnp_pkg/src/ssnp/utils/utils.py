@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from functools import lru_cache
 from pycuda import gpuarray, driver as cuda
 
@@ -32,6 +33,23 @@ def get_stream(ctx):
 
 def get_stream_in_current():
     return get_stream(cuda.Context.get_current())
+
+
+__context_disabled = False
+
+
+@contextmanager
+def pop_pycuda_context():
+    global __context_disabled
+    if __context_disabled:  # do nothing if nested
+        yield
+        return
+    ctx = cuda.Context.get_current()
+    ctx.pop()
+    __context_disabled = True
+    yield ctx
+    __context_disabled = False
+    ctx.push()
 
 
 class Config:
