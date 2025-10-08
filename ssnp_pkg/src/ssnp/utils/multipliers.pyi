@@ -11,8 +11,8 @@ def _cache_array(func: Callable[..., Tuple[tuple, Callable[[], ndarray]]]): ...
 class Multipliers:
     _cache: dict
     _gpu_cache: dict
-    _xy_size: Tuple[int, int]
-    _shape: Tuple[int, int]
+    xy_size: Tuple[int, int]
+    shape: Tuple[int, int]
     res: Tuple[Real, Real, Real]
     stream: Optional[Stream]
 

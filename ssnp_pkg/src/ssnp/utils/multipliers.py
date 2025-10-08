@@ -34,17 +34,29 @@ def _cache_array(func):
 class Multipliers:
     def __init__(self, shape, res, stream=None):
         assert len(shape) == 2
-        self._xy_size = (shape[1], shape[0])
         self._shape = shape
-        self.res = res
+        self._res = res
         self._cache = {}
         self._gpu_cache = {}
         self.stream = stream
 
+    @property
+    def shape(self):
+        return self._shape
+
+    @property
+    def res(self):
+        return self._res
+
+    @property
+    def xy_size(self):
+        """reversed shape, since shape is (col, row) or (y, x)"""
+        return self._shape[::-1]
+
     @_cache_array
     def tilt(self, c_ab, *, trunc, periodic_params=None, c_ab_out=None):
         res = self.res
-        xy_size = self._xy_size
+        xy_size = self.xy_size
         norm = tuple(xy_size[i] * res[i] for i in (0, 1))  # to be confirmed: * config.n0
         kernel = None
         if trunc:
@@ -116,7 +128,7 @@ class Multipliers:
         """
         if isinstance(shift, Number):
             shift = (shift, shift)
-        xy_size = self._xy_size
+        xy_size = self.xy_size
         res = self.res
         key = ("cg", res, *[round(s, 4) for s in shift])
 
@@ -154,7 +166,7 @@ class Multipliers:
 
     @_cache_array
     def soft_crop(self, width, *, total_slices=1, pos=0, strength=1):
-        xy_size = self._xy_size
+        xy_size = self.xy_size
         width = float(width)
         if width >= 1 or width <= 0:
             raise ValueError("width should be a relative value in 0-1")
@@ -187,7 +199,7 @@ class Multipliers:
         :param width: crop size specification
         """
         err_width = ValueError(f"invalid width spec {width}")
-        xy_size = self._xy_size
+        xy_size = self.xy_size
         if isinstance(width, float):
             width = width / 2 + 1e-8
             x_size, y_size = [int(width * i) for i in xy_size]
@@ -223,7 +235,7 @@ class Multipliers:
 
     @_cache_array
     def gaussian(self, sigma, mu=(0, 0)):
-        xy_size = self._xy_size
+        xy_size = self.xy_size
         sigma = float(sigma)
         mu = tuple(float(i) for i in mu)
         for i in mu:
