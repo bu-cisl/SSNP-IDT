@@ -90,6 +90,8 @@ class Funcs:
             batch = 1
         else:
             raise NotImplementedError(f"cannot process {len(shape)}-D data")
+        # `shape` is already checked to be tuple[int, int]
+        # noinspection PyTypeChecker
         self.shape = shape
         self.batch = batch
 
@@ -227,8 +229,9 @@ class Funcs:
 
     @contextmanager
     def fourier(self, arr, copy=False):
-        yield self.fft(arr, copy=copy)
-        self.ifft(arr)
+        f_arr = self.fft(arr, copy=copy)
+        yield f_arr
+        self.ifft(f_arr)
 
     def diffract(self, *args):
         raise NotImplementedError
@@ -355,7 +358,7 @@ class SSNPFuncs(Funcs):
     def _get_prop(self, dz):
         res = self.res
         n0 = self.n0
-        key = round(dz * 1000)
+        key = round(dz, 3)
         try:
             return self._prop_cache[key]
         except KeyError:
@@ -451,7 +454,7 @@ class BPMFuncs(Funcs):
     def _get_prop(self, dz):
         res = self.res
         n0 = self.n0
-        key = (round(dz * 1000), "bpm")
+        key = (round(dz, 3), "bpm")
         try:
             return self._prop_cache[key]
         except KeyError:
@@ -464,7 +467,7 @@ class BPMFuncs(Funcs):
                 "double2 *u, double *n_",
                 f"""
                     ni = n_[i % (n / {self.batch})];
-                    temp = make_cuDoubleComplex(cos(ni * {phase_factor}), sin(ni * {phase_factor}));
+                    sincos(ni * {phase_factor}, &temp.y, &temp.x);
                     u[i] = cuCmul(u[i], temp);
                 """,
                 loop_prep="double2 temp; double ni",
@@ -478,7 +481,7 @@ class BPMFuncs(Funcs):
                 # Forward: u=u*temp
                 f"""
                     ni = n_[i % (n / {self.batch})];
-                    temp_conj = make_cuDoubleComplex(cos(ni * {phase_factor}), -sin(ni * {phase_factor}));
+                    sincos(ni * -{phase_factor}, &temp_conj.y, &temp_conj.x);
                     n_g[i] = {phase_factor} * 
                         (cuCimag(ug[i]) * cuCreal(u[i]) - cuCimag(u[i]) * cuCreal(ug[i]));
                     ug[i] = cuCmul(ug[i], temp_conj);

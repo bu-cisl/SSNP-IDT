@@ -9,12 +9,7 @@ from pycuda import gpuarray
 if platform.system() == 'Windows':
     # eliminate "non-UTF8 char" warnings
     pycuda.compiler.DEFAULT_NVCC_FLAGS = ['-Xcompiler', '/wd 4819']
-    # remove code below if you have valid C compiler in `PATH` already
-    import glob
 
-    CL_PATH = max(glob.glob(r"C:\Program Files (x86)\Microsoft Visual Studio"
-                            r"\*\*\VC\Tools\MSVC\*\bin\Hostx64\x64\cl.exe"))
-    os.environ['PATH'] += ";" + CL_PATH[:-7]
 
 from ssnp import BeamArray
 import ssnp
@@ -22,14 +17,24 @@ import ssnp
 ssnp.config.set(xyz=(0.1, 0.2, 0.3), lambda0=0.632)
 
 
+class TestBeamSetUp(TestCase):
+    def setUp(self):
+        self.ones_cpu = np.ones(dtype=np.complex128, shape=(128, 128))
+        self.ones_gpu = pycuda.gpuarray.to_gpu(self.ones_cpu)
+
+    def test_defaults(self):
+        beam = BeamArray(self.ones_gpu)
+        self.assertEqual(beam.dtype, np.complex128)
+
 class TestBeamArraySingle(TestCase):
     def setUp(self) -> None:
-        u = ssnp.read("plane", dtype=np.complex128, shape=(128, 128))
+        self.shape = (128, 128)
+        u = np.ones(self.shape, np.complex128)
         self.beam = BeamArray(u)
         self.rng = np.random.default_rng()
 
-    def assertArrayEqual(self, a, b, delta=0.):
-        # currently don't want to directly calculate GPUArray with numpy function
+    def assertArrayEqual(self, a: np.ndarray, b: np.ndarray, delta=0.):
+        # don't directly calculate GPUArray with numpy function
         self.assertIsInstance(a, np.ndarray)
         self.assertIsInstance(b, np.ndarray)
         self.assertEqual(a.shape, b.shape)

@@ -337,10 +337,9 @@ class BeamArray:
     def mse_loss(self, forward=None, *, backward=None):
         # parameter check
         if self._u2 is None and backward is not None:
-            warn("computing mse loss for forward only beam, backward part is ignored")
-            backward = None
+            raise ValueError("cannot specify backward for the mse_loss of a forward-only beam")
         if forward is None and backward is None:
-            raise TypeError(f"mse_loss needs at least 1 argument")
+            raise TypeError(f"{type(self).__name__}.mse_loss takes at least 1 argument")
         # mse (and grad) computation
         loss = 0
         ufg = ubg = None
