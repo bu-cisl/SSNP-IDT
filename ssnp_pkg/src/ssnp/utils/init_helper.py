@@ -1,4 +1,5 @@
 import warnings
+import platform
 
 
 def pycuda_test():
@@ -19,7 +20,7 @@ def pycuda_test():
     except ExecError:
         warn(f"maybe nvcc is not in PATH?")
     except BaseException as e:
-        warn(f"unknown error: {e}")
+        warn(f"unknown error: {e!r}")
 
 
 def autoinit():
@@ -30,5 +31,19 @@ def autoinit():
         import pycuda.autoinit
 
 
+def patch_compiler_cache():
+    import pycuda.compiler
+    code = pycuda.compiler.compile_plain.__code__
+    code_consts = list(code.co_consts)
+    if code_consts.count('#include') != 1:
+        warnings.warn(
+            "cannot apply the patch to eliminate preprocessing before caching, since pycuda.compiler.compile_plain has been changed")
+        return
+    code_consts[code_consts.index('#include')] = '!!NOTEXISTED#@!!'
+    pycuda.compiler.compile_plain.__code__ = code.replace(co_consts=tuple(code_consts))
+
+
 autoinit()
 pycuda_test()
+if platform.system() == 'Windows':
+    patch_compiler_cache()
