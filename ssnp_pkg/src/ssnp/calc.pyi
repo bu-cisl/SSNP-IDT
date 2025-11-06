@@ -1,6 +1,6 @@
 from typing import Literal, Union, Optional, Sequence
 from pycuda.driver import Stream
-from ssnp.funcs import BPMFuncs, SSNPFuncs, Funcs
+from ssnp.funcs import BPMFuncs, SSNPFuncs, Funcs, MLBFuncs
 from pycuda.gpuarray import GPUArray
 import numpy as np
 from numbers import Real, Complex
@@ -23,6 +23,10 @@ def bpm_grad_bp(u: Optional[GPUArray], ug: GPUArray, dz: Real, n: GPUArray = Non
 
 def ssnp_grad_bp(u: Optional[GPUArray], ug: GPUArray, u_dg: Optional[GPUArray], dz: Real, n=None, ng=None,
                  config: Config = None, stream: Stream = None) -> GPUArray: ...
+
+
+def mlb_step(u: GPUArray, temp_like_u: Optional[GPUArray], dz: Real, n: GPUArray = None,
+             config: Config = None, stream: Stream = None): ...
 
 
 def reduce_mse(u: GPUArray, measurement: GPUArray, stream: Stream = None) -> np.double: ...
@@ -69,6 +73,6 @@ def split_grad(ug: GPUArray, u_dg: GPUArray, config: Config = None,
 
 
 def get_funcs(arr_like: GPUArray, config: Config = None, *,
-              model: Literal['ssnp', 'bpm', 'any', 'BPM', 'SSNP', 'Any', 'ANY'] = 'any',
+              model: Literal['ssnp', 'bpm', 'any', 'BPM', 'SSNP', 'mlb', 'Any', 'ANY'] = 'any',
               stream: Stream = None,
-              fft_type: Literal["reikna", "skcuda"] = "skcuda") -> Union[BPMFuncs, SSNPFuncs, Funcs]: ...
+              fft_type: Literal["reikna", "skcuda"] = "skcuda") -> Union[BPMFuncs, SSNPFuncs, MLBFuncs, Funcs]: ...

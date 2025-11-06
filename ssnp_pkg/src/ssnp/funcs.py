@@ -73,7 +73,7 @@ class Funcs:
             return funcs_item
         raise AttributeError(f"'{type(self).__name__}' has no attribute {item}")
 
-    def __init__(self, arr_like, res, n0, stream=None, fft_type="skcuda"):
+    def __init__(self, arr_like, _, __, stream=None, fft_type="skcuda"):
         if self._initialized:
             return
         self._initialized = True
@@ -112,20 +112,6 @@ class Funcs:
             raise ValueError(f"Unknown FFT type {fft_type}")
         self.ifft = partial(self.fft, inverse=True)
 
-        # kz and related multipliers
-        if type(self) is not Funcs:
-            self._prop_cache = {}
-            self._pupil_cache = {}
-            self.res = res
-            self.n0 = n0
-            self.multiplier = Multipliers(shape, res, stream)
-            c_gamma = self.multiplier.c_gamma()
-            # c_gamma = np.broadcast_to(c_gamma, arr_like.shape)  # propagation is batched so no extra copies are needed
-            kz = c_gamma * (2 * np.pi * res[2])
-            self.kz = kz.astype(np.double)
-            self.kz_gpu = gpuarray.to_gpu(kz)
-            self.eva = np.exp(np.minimum((c_gamma - 0.2) * 5, 0))
-
         # function interface
         self.sum_cmplx_batch_krn = elementwise.ElementwiseKernel(
             "double2 *out, double2 *u",
@@ -147,6 +133,20 @@ class Funcs:
             """,
             loop_prep="unsigned j",
         )
+
+    def _init_kz(self, res, n0):
+        # kz and related multipliers
+        self._prop_cache = {}
+        self._pupil_cache = {}
+        self.res = res
+        self.n0 = n0
+        self.multiplier = Multipliers(self.shape, res, self.stream)
+        # propagation is batched so explicit broadcast is not needed
+        c_gamma = self.multiplier.c_gamma()
+        kz = c_gamma * (2 * np.pi * res[2])
+        self.kz = kz.astype(np.double)
+        self.kz_gpu = gpuarray.to_gpu(kz)
+        self.eva = np.exp(np.minimum((c_gamma - 0.2) * 5, 0))
 
     @staticmethod
     @lru_cache
@@ -280,6 +280,7 @@ class SSNPFuncs(Funcs):
         if self._initialized:
             return
         super(SSNPFuncs, self).__init__(*args, **kwargs)
+        self._init_kz(args[1], args[2])
         self._fused_mam_callable_krn = elementwise.ElementwiseKernel(
             "double2 *a, double2 *b, "
             "double2 *p00, double2 *p01, double2 *p10, double2 *p11",
@@ -451,6 +452,12 @@ class SSNPFuncs(Funcs):
 
 
 class BPMFuncs(Funcs):
+    def __init__(self, *args, **kwargs):
+        if self._initialized:
+            return
+        super().__init__(*args, **kwargs)
+        self._init_kz(args[1], args[2])
+
     def _get_prop(self, dz):
         res = self.res
         n0 = self.n0
@@ -521,3 +528,66 @@ class BPMFuncs(Funcs):
             self._get_prop(dz)["Qg_wo_ng"](n, ug, stream=self.stream)
         else:
             self._get_prop(dz)["Qg"](u, n, ug, ng, stream=self.stream)
+
+
+class MLBFuncs(Funcs):
+    """Multi-Layer Born model"""
+
+    # Ref: M. Chen, et al., "MLB MS model for 3D PM", DOI 10.1364/OPTICA.383030
+    # [Algorithm 1 L2-4] U_new = iF{P * F{U_old} + F_G * F{U_old * V * dz [* unit_z]}}
+    # [Eq. 6] F_G = (-i / 4 / PI) * P / Gamma
+    # Gamma = (n0 / lambda0) * sqrt(1 - (|fxy| * lambda0 / n0)^2) = (n0 / lambda0) * Multipliers.c_gamma
+    # kz := Multipliers.c_gamma * 2 Pi * res_z = Multipliers.c_gamma * 2 Pi * unit_z * (n0 / lambda0)
+    # Gamma unit_z = res_z * Multipliers.c_gamma = kz / (2 Pi)
+    # F_G = (-i / 2 / kz) * P [* unit_z]
+    # [Eq. 1] V = (2 Pi / lambda0)^2 * (n0^2 - (n0 + dn)^2) = kb^2 * (n0^2 - (n0 + dn)^2) / n0^2
+    # 2 Pi / lambda0 * n0 = 2 Pi * res_z [/ unit_z]
+    # V = 4 Pi^2 * res_z^2 / n0^2 * (n0^2 - (n0 + dn)^2) [/ unit_z^2]
+    # U_new = iF{P * (F{U_old} + F_U_old_s)}
+    # F_U_old_s := F_G * F{U_old * V * dz [* unit_z]} / P
+    #           = (-i / 2 / kz) * (4 Pi^2 * res_z^2 / n0^2 * dz * F{U_old * (n0^2 - (n0 + dn)^2)}
+    #           = -i * 2 Pi^2 * res_z^2 / n0^2 * dz / kz * F{U_old * (n0^2 - (n0 + dn)^2)}
+    def __init__(self, *args, **kwargs):
+        if self._initialized:
+            return
+        super().__init__(*args, **kwargs)
+        self._init_kz(args[1], args[2])
+
+    def _get_prop(self, dz):
+        res = self.res
+        n0 = self.n0
+        key = (round(dz, 3), "mlb")
+        try:
+            return self._prop_cache[key]
+        except KeyError:
+            kz = self.kz.astype(np.complex128)
+            eva = self.eva
+            p_mat = np.exp(kz * (1j * dz))
+            p_mat = gpuarray.to_gpu(p_mat * eva)
+            merge_mat = (-2j * (np.pi * res[2] / n0) ** 2 * dz) / kz
+            merge_mat = gpuarray.to_gpu(merge_mat)
+
+            scatter_op = elementwise.ElementwiseKernel(
+                "pycuda::complex<double> *u, double *n_, pycuda::complex<double> *u_s_out",
+                f"""
+                    temp = n_[i % (n / {self.batch})];
+                    temp = temp * ({2 * n0} + temp);
+                    u_s_out[i] = temp * u[i];
+                """,
+                loop_prep="double temp",
+                name="ssnp_q"
+            )
+
+        new_prop = {"P": p_mat, "Q1": scatter_op, "Q2": merge_mat}
+        self._prop_cache[key] = new_prop
+        return new_prop
+
+    def diffract(self, a, dz):
+        self.op(a, "*", self._get_prop(dz)["P"])
+
+    def pure_scatter(self, u, n, dz, u_s_out):
+        self._get_prop(dz)["Q1"](u, n, u_s_out, stream=self.stream)
+
+    def merge_scatter(self, a, a_s, dz):
+        self.op(a_s, "*", self._get_prop(dz)["Q2"])
+        a += a_s

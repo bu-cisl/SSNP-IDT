@@ -1,6 +1,6 @@
 import numpy as np
 from pycuda import gpuarray
-from ssnp.funcs import BPMFuncs, SSNPFuncs, Funcs
+from ssnp.funcs import BPMFuncs, SSNPFuncs, Funcs, MLBFuncs
 from ssnp.utils import param_check, config as global_config, Multipliers
 from numbers import Complex
 
@@ -91,6 +91,35 @@ def ssnp_grad_bp(u, ug, u_dg, dz, n=None, ng=None, config=None, stream=None):
         funcs.diffract_g(ag, a_dg, dz)
     return ng
 
+def mlb_step(u, temp_like_u, dz, n=None, config=None, stream=None):
+    """
+    MLB main operation of one step
+
+    :param u: x-y complex amplitude
+    :param temp_like_u: temporary memory, array with the same attribute as u, only for scattering
+    :param dz: step size along z axis
+    :param n: refractive index along x-y distribution in this slice. Use background N0 if not provided.
+    :param config:
+    :param stream:
+    :return: new (u, u_d) after a step towards +z direction
+    """
+    if len(u.shape) == 3:
+        param_check(u=u[0], n=n)
+    else:
+        param_check(u=u, n=n)
+    funcs: MLBFuncs = get_funcs(u, config, model="mlb", stream=stream)
+    # Step 1 - calculate u_scatter = u * ((n0 + n) ** 2 - n0 ** 2)
+    if n is not None:
+        funcs.pure_scatter(u, n, dz, temp_like_u)
+    a = funcs.fft(u)
+    # Step 2 - a_with_scatter = a_without_scatter + (... / kz) * a_scatter
+    if n is not None:
+        a_s = funcs.fft(temp_like_u)
+        funcs.merge_scatter(a, a_s, dz)
+    # Step 3 - angular spectrum propagation as the final step, no matter scattered or not
+    funcs.diffract(a, dz)
+    u = funcs.ifft(a)
+    return u
 
 def reduce_mse(u, measurement, stream=None):
     param_check(u=u, measurement=measurement)
@@ -225,7 +254,7 @@ def get_funcs(arr_like, config=None, *, model="any", stream=None, fft_type="skcu
         res = config.res
         n0 = config.n0
     try:
-        model_init = {"ssnp": SSNPFuncs, "bpm": BPMFuncs, "any": Funcs}[name]
+        model_init = {"ssnp": SSNPFuncs, "bpm": BPMFuncs, "mlb": MLBFuncs, "any": Funcs}[name]
     except KeyError:
         raise ValueError(f"unknown model {model}") from None
     return model_init(arr_like, res, n0, stream, fft_type)
