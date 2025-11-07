@@ -137,7 +137,6 @@ class Funcs:
     def _init_kz(self, res, n0):
         # kz and related multipliers
         self._prop_cache = {}
-        self._pupil_cache = {}
         self.res = res
         self.n0 = n0
         self.multiplier = Multipliers(self.shape, res, self.stream)
@@ -547,6 +546,10 @@ class MLBFuncs(Funcs):
     # F_U_old_s := F_G * F{U_old * V * dz [* unit_z]} / P
     #           = (-i / 2 / kz) * (4 Pi^2 * res_z^2 / n0^2 * dz * F{U_old * (n0^2 - (n0 + dn)^2)}
     #           = -i * 2 Pi^2 * res_z^2 / n0^2 * dz / kz * F{U_old * (n0^2 - (n0 + dn)^2)}
+
+    # Note that the sign of imaginary part of the complex field of the equations above seems
+    # consistent with the paper but different from the code below
+
     def __init__(self, *args, **kwargs):
         if self._initialized:
             return
@@ -561,10 +564,12 @@ class MLBFuncs(Funcs):
             return self._prop_cache[key]
         except KeyError:
             kz = self.kz.astype(np.complex128)
+            # cos(t) == 0.1 -> NA ~ 0.995, so we can suppress value smaller than that
+            kz = np.maximum(kz, np.max(kz) * 0.1)
             eva = self.eva
             p_mat = np.exp(kz * (1j * dz))
             p_mat = gpuarray.to_gpu(p_mat * eva)
-            merge_mat = (-2j * (np.pi * res[2] / n0) ** 2 * dz) / kz
+            merge_mat = (2j * (np.pi * res[2] / n0) ** 2 * dz) / kz
             merge_mat = gpuarray.to_gpu(merge_mat)
 
             scatter_op = elementwise.ElementwiseKernel(
