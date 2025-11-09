@@ -8,68 +8,75 @@ from functools import partial, lru_cache
 from skcuda import fft as skfft
 import logging
 
+_funcs_cache = {}
+_generic_funcs = {
+    'reduce_sse_cr_krn': lambda: reduction.ReductionKernel(
+        dtype_out=np.double, neutral=0,
+        reduce_expr="a+b",
+        map_expr="(cuCabs(x[i]) - y[i]) * (cuCabs(x[i]) - y[i])",
+        arguments="double2 *x, double *y",
+        preamble='#include "cuComplex.h"'
+    ),
+    'reduce_sse_cc_krn': lambda: reduction.ReductionKernel(
+        dtype_out=np.double, neutral=0,
+        reduce_expr="a+b",
+        map_expr="cuCabs(cuCsub(x[i], y[i])) * cuCabs(cuCsub(x[i], y[i]))",
+        arguments="double2 *x, double2 *y",
+        preamble='#include "cuComplex.h"'
+    ),
+    'mse_cc_grad_krn': lambda: elementwise.ElementwiseKernel(
+        "double2 *u, double2 *m, double2 *out",
+        """
+        out[i] = cuCsub(u[i], m[i]);
+        out[i].x *= 2. / (double)n; out[i].y *= 2. / (double)n;
+        """,
+        preamble='#include "cuComplex.h"'
+    ),
+    'mse_cr_grad_krn': lambda: elementwise.ElementwiseKernel(
+        "double2 *u, double *m, double2 *out",
+        """
+        temp = 2 * (1 - m[i] / cuCabs(u[i]));
+        if (!isfinite(temp))
+            temp = (double)0;
+        out[i].x = temp * u[i].x / (double)n; out[i].y = temp * u[i].y / (double)n;
+        """,
+        loop_prep="double temp",
+        preamble='#include "cuComplex.h"'
+    ),
+    'abs_cc_krn': lambda: elementwise.ElementwiseKernel(
+        "double2 *x, double2 *out",
+        "out[i] = make_cuDoubleComplex(cuCabs(x[i]), 0)",
+        preamble='#include "cuComplex.h"'
+    )
+}
+
 
 class Funcs:
-    # __temp_memory_pool = {}
-    _funcs_cache = {}
-    reduce_sse_cr_krn = None
+    _initialized = False
 
-    def __new__(cls, arr_like, res, n0, stream=None, fft_type="reikna"):
-        if cls.reduce_sse_cr_krn is None:
-            Funcs.reduce_sse_cr_krn = reduction.ReductionKernel(
-                dtype_out=np.double, neutral=0,
-                reduce_expr="a+b",
-                map_expr="(cuCabs(x[i]) - y[i]) * (cuCabs(x[i]) - y[i])",
-                arguments="double2 *x, double *y",
-                preamble='#include "cuComplex.h"'
-            )
-            Funcs.reduce_sse_cc_krn = reduction.ReductionKernel(
-                dtype_out=np.double, neutral=0,
-                reduce_expr="a+b",
-                map_expr="cuCabs(cuCsub(x[i], y[i])) * cuCabs(cuCsub(x[i], y[i]))",
-                arguments="double2 *x, double2 *y",
-                preamble='#include "cuComplex.h"'
-            )
-            Funcs.mse_cc_grad_krn = elementwise.ElementwiseKernel(
-                "double2 *u, double2 *m, double2 *out",
-                """
-                out[i] = cuCsub(u[i], m[i]);
-                out[i].x *= 2. / (double)n; out[i].y *= 2. / (double)n;
-                """,
-                preamble='#include "cuComplex.h"'
-            )
-            Funcs.mse_cr_grad_krn = elementwise.ElementwiseKernel(
-                "double2 *u, double *m, double2 *out",
-                """
-                temp = 2 * (1 - m[i] / cuCabs(u[i]));
-                if (!isfinite(temp))
-                    temp = (double)0;
-                out[i].x = temp * u[i].x / (double)n; out[i].y = temp * u[i].y / (double)n;
-                """,
-                loop_prep="double temp",
-                preamble='#include "cuComplex.h"'
-            )
-            Funcs.abs_cc_krn = elementwise.ElementwiseKernel(
-                "double2 *x, double2 *out",
-                "out[i] = make_cuDoubleComplex(cuCabs(x[i]), 0)",
-                preamble='#include "cuComplex.h"'
-            )
-
+    def __new__(cls, arr_like, res, n0, stream=None, fft_type="skcuda"):
         if res is not None:
-            res = tuple(round(res_i * 1e12) for res_i in res)
+            res = tuple(round(res_i, 12) for res_i in res)
         if n0 is not None:
-            n0 = round(n0 * 1e12)
-        key = (tuple(arr_like.shape), arr_like.dtype, res, n0, stream, fft_type)
+            n0 = round(n0, 12)
+        key = (cls, tuple(arr_like.shape), arr_like.dtype, res, n0, stream, fft_type)
         try:
-            return cls._funcs_cache[key]
+            return _funcs_cache[key]
         except KeyError:
-            cls._funcs_cache[key] = super().__new__(cls)
-            return cls._funcs_cache[key]
+            _funcs_cache[key] = super().__new__(cls)
+            return _funcs_cache[key]
 
-    def __init__(self, arr_like, res, n0, stream=None, fft_type="skcuda"):
-        if self._initialized():
+    def __getattr__(self, item):
+        if item in _generic_funcs:
+            funcs_item = _generic_funcs[item]()
+            setattr(Funcs, item, funcs_item)  # lazy load and cache globally
+            return funcs_item
+        raise AttributeError(f"'{type(self).__name__}' has no attribute {item}")
+
+    def __init__(self, arr_like, _, __, stream=None, fft_type="skcuda"):
+        if self._initialized:
             return
-        self._funcs_cache = None  # only used for mark `self` as initialized
+        self._initialized = True
 
         if stream is None:
             stream = get_stream_in_current()
@@ -83,6 +90,8 @@ class Funcs:
             batch = 1
         else:
             raise NotImplementedError(f"cannot process {len(shape)}-D data")
+        # `shape` is already checked to be tuple[int, int]
+        # noinspection PyTypeChecker
         self.shape = shape
         self.batch = batch
 
@@ -102,20 +111,6 @@ class Funcs:
         else:
             raise ValueError(f"Unknown FFT type {fft_type}")
         self.ifft = partial(self.fft, inverse=True)
-
-        # kz and related multipliers
-        if type(self) is not Funcs:
-            self._prop_cache = {}
-            self._pupil_cache = {}
-            self.res = res
-            self.n0 = n0
-            self.multiplier = Multipliers(shape, res, stream)
-            c_gamma = self.multiplier.c_gamma()
-            # c_gamma = np.broadcast_to(c_gamma, arr_like.shape)  # propagation is batched so no extra copies are needed
-            kz = c_gamma * (2 * np.pi * res[2])
-            self.kz = kz.astype(np.double)
-            self.kz_gpu = gpuarray.to_gpu(kz)
-            self.eva = np.exp(np.minimum((c_gamma - 0.2) * 5, 0))
 
         # function interface
         self.sum_cmplx_batch_krn = elementwise.ElementwiseKernel(
@@ -139,8 +134,18 @@ class Funcs:
             loop_prep="unsigned j",
         )
 
-    def _initialized(self):
-        return self._funcs_cache is None
+    def _init_kz(self, res, n0):
+        # kz and related multipliers
+        self._prop_cache = {}
+        self.res = res
+        self.n0 = n0
+        self.multiplier = Multipliers(self.shape, res, self.stream)
+        # propagation is batched so explicit broadcast is not needed
+        c_gamma = self.multiplier.c_gamma()
+        kz = c_gamma * (2 * np.pi * res[2])
+        self.kz = kz.astype(np.double)
+        self.kz_gpu = gpuarray.to_gpu(kz)
+        self.eva = np.exp(np.minimum((c_gamma - 0.2) * 5, 0))
 
     @staticmethod
     @lru_cache
@@ -168,17 +173,17 @@ class Funcs:
     def reduce_sse(self, field, measurement):
         if field.dtype == np.complex128:
             if measurement.dtype == np.float64:
-                return Funcs.reduce_sse_cr_krn(field, measurement, stream=self.stream)
+                return self.reduce_sse_cr_krn(field, measurement, stream=self.stream)
             elif measurement.dtype == np.complex128:
-                return Funcs.reduce_sse_cc_krn(field, measurement, stream=self.stream)
+                return self.reduce_sse_cc_krn(field, measurement, stream=self.stream)
         raise TypeError(f"incompatible dtype: field {field.dtype}, measurement {measurement.dtype}")
 
     def mse_grad(self, field, measurement, gradient):
         if field.dtype == np.complex128 and gradient.dtype == np.complex128:
             if measurement.dtype == np.float64:
-                return Funcs.mse_cr_grad_krn(field, measurement, gradient, stream=self.stream)
+                return self.mse_cr_grad_krn(field, measurement, gradient, stream=self.stream)
             elif measurement.dtype == np.complex128:
-                return Funcs.mse_cc_grad_krn(field, measurement, gradient, stream=self.stream)
+                return self.mse_cc_grad_krn(field, measurement, gradient, stream=self.stream)
         raise TypeError(f"incompatible dtype: field {field.dtype}, measurement {measurement.dtype}, "
                         f"gradient {gradient.dtype}")
 
@@ -223,8 +228,9 @@ class Funcs:
 
     @contextmanager
     def fourier(self, arr, copy=False):
-        yield self.fft(arr, copy=copy)
-        self.ifft(arr)
+        f_arr = self.fft(arr, copy=copy)
+        yield f_arr
+        self.ifft(f_arr)
 
     def diffract(self, *args):
         raise NotImplementedError
@@ -267,24 +273,13 @@ class Funcs:
                                  arr.gpudata, out.gpudata, arr.mem_size)
         return out
 
-    # @staticmethod
-    # def get_temp_mem(arr_like: GPUArray, index=0):
-    #     key = (arr_like.shape, arr_like.dtype, index)
-    #     try:
-    #         return Funcs.__temp_memory_pool[key]
-    #     except KeyError:
-    #         mem = gpuarray.empty_like(arr_like)
-    #         Funcs.__temp_memory_pool[key] = mem
-    #         return mem
-
 
 class SSNPFuncs(Funcs):
-    _funcs_cache = {}
-
     def __init__(self, *args, **kwargs):
-        if self._initialized():
+        if self._initialized:
             return
         super(SSNPFuncs, self).__init__(*args, **kwargs)
+        self._init_kz(args[1], args[2])
         self._fused_mam_callable_krn = elementwise.ElementwiseKernel(
             "double2 *a, double2 *b, "
             "double2 *p00, double2 *p01, double2 *p10, double2 *p11",
@@ -363,7 +358,7 @@ class SSNPFuncs(Funcs):
     def _get_prop(self, dz):
         res = self.res
         n0 = self.n0
-        key = round(dz * 1000)
+        key = round(dz, 3)
         try:
             return self._prop_cache[key]
         except KeyError:
@@ -456,12 +451,16 @@ class SSNPFuncs(Funcs):
 
 
 class BPMFuncs(Funcs):
-    _funcs_cache = {}
+    def __init__(self, *args, **kwargs):
+        if self._initialized:
+            return
+        super().__init__(*args, **kwargs)
+        self._init_kz(args[1], args[2])
 
     def _get_prop(self, dz):
         res = self.res
         n0 = self.n0
-        key = (round(dz * 1000), "bpm")
+        key = (round(dz, 3), "bpm")
         try:
             return self._prop_cache[key]
         except KeyError:
@@ -474,7 +473,7 @@ class BPMFuncs(Funcs):
                 "double2 *u, double *n_",
                 f"""
                     ni = n_[i % (n / {self.batch})];
-                    temp = make_cuDoubleComplex(cos(ni * {phase_factor}), sin(ni * {phase_factor}));
+                    sincos(ni * {phase_factor}, &temp.y, &temp.x);
                     u[i] = cuCmul(u[i], temp);
                 """,
                 loop_prep="double2 temp; double ni",
@@ -488,7 +487,7 @@ class BPMFuncs(Funcs):
                 # Forward: u=u*temp
                 f"""
                     ni = n_[i % (n / {self.batch})];
-                    temp_conj = make_cuDoubleComplex(cos(ni * {phase_factor}), -sin(ni * {phase_factor}));
+                    sincos(ni * -{phase_factor}, &temp_conj.y, &temp_conj.x);
                     n_g[i] = {phase_factor} * 
                         (cuCimag(ug[i]) * cuCreal(u[i]) - cuCimag(u[i]) * cuCreal(ug[i]));
                     ug[i] = cuCmul(ug[i], temp_conj);
@@ -528,3 +527,72 @@ class BPMFuncs(Funcs):
             self._get_prop(dz)["Qg_wo_ng"](n, ug, stream=self.stream)
         else:
             self._get_prop(dz)["Qg"](u, n, ug, ng, stream=self.stream)
+
+
+class MLBFuncs(Funcs):
+    """Multi-Layer Born model"""
+
+    # Ref: M. Chen, et al., "MLB MS model for 3D PM", DOI 10.1364/OPTICA.383030
+    # [Algorithm 1 L2-4] U_new = iF{P * F{U_old} + F_G * F{U_old * V * dz [* unit_z]}}
+    # [Eq. 6] F_G = (-i / 4 / PI) * P / Gamma
+    # Gamma = (n0 / lambda0) * sqrt(1 - (|fxy| * lambda0 / n0)^2) = (n0 / lambda0) * Multipliers.c_gamma
+    # kz := Multipliers.c_gamma * 2 Pi * res_z = Multipliers.c_gamma * 2 Pi * unit_z * (n0 / lambda0)
+    # Gamma unit_z = res_z * Multipliers.c_gamma = kz / (2 Pi)
+    # F_G = (-i / 2 / kz) * P [* unit_z]
+    # [Eq. 1] V = (2 Pi / lambda0)^2 * (n0^2 - (n0 + dn)^2) = kb^2 * (n0^2 - (n0 + dn)^2) / n0^2
+    # 2 Pi / lambda0 * n0 = 2 Pi * res_z [/ unit_z]
+    # V = 4 Pi^2 * res_z^2 / n0^2 * (n0^2 - (n0 + dn)^2) [/ unit_z^2]
+    # U_new = iF{P * (F{U_old} + F_U_old_s)}
+    # F_U_old_s := F_G * F{U_old * V * dz [* unit_z]} / P
+    #           = (-i / 2 / kz) * (4 Pi^2 * res_z^2 / n0^2 * dz * F{U_old * (n0^2 - (n0 + dn)^2)}
+    #           = -i * 2 Pi^2 * res_z^2 / n0^2 * dz / kz * F{U_old * (n0^2 - (n0 + dn)^2)}
+
+    # Note that the sign of imaginary part of the complex field of the equations above seems
+    # consistent with the paper but different from the code below
+
+    def __init__(self, *args, **kwargs):
+        if self._initialized:
+            return
+        super().__init__(*args, **kwargs)
+        self._init_kz(args[1], args[2])
+
+    def _get_prop(self, dz):
+        res = self.res
+        n0 = self.n0
+        key = (round(dz, 3), "mlb")
+        try:
+            return self._prop_cache[key]
+        except KeyError:
+            kz = self.kz.astype(np.complex128)
+            # cos(t) == 0.1 -> NA ~ 0.995, so we can suppress value smaller than that
+            kz = np.maximum(kz, np.max(kz) * 0.1)
+            eva = self.eva
+            p_mat = np.exp(kz * (1j * dz))
+            p_mat = gpuarray.to_gpu(p_mat * eva)
+            merge_mat = (2j * (np.pi * res[2] / n0) ** 2 * dz) / kz
+            merge_mat = gpuarray.to_gpu(merge_mat)
+
+            scatter_op = elementwise.ElementwiseKernel(
+                "pycuda::complex<double> *u, double *n_, pycuda::complex<double> *u_s_out",
+                f"""
+                    temp = n_[i % (n / {self.batch})];
+                    temp = temp * ({2 * n0} + temp);
+                    u_s_out[i] = temp * u[i];
+                """,
+                loop_prep="double temp",
+                name="ssnp_q"
+            )
+
+        new_prop = {"P": p_mat, "Q1": scatter_op, "Q2": merge_mat}
+        self._prop_cache[key] = new_prop
+        return new_prop
+
+    def diffract(self, a, dz):
+        self.op(a, "*", self._get_prop(dz)["P"])
+
+    def pure_scatter(self, u, n, dz, u_s_out):
+        self._get_prop(dz)["Q1"](u, n, u_s_out, stream=self.stream)
+
+    def merge_scatter(self, a, a_s, dz):
+        self.op(a_s, "*", self._get_prop(dz)["Q2"])
+        a += a_s

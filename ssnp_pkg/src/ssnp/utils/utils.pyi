@@ -1,4 +1,6 @@
-from typing import Tuple, Union, List
+import contextlib
+import pycuda.driver as cuda
+from typing import Tuple, Union, List, Optional
 
 FFF_P = Union[Tuple[float, float, float], property]
 F_P = Union[float, property]
@@ -7,10 +9,13 @@ F_P = Union[float, property]
 def param_check(**kwargs): ...
 
 
-def get_stream(ctx): ...
+def get_stream(ctx: cuda.Context) -> cuda.Stream: ...
 
 
-def get_stream_in_current(): ...
+def get_stream_in_current() -> cuda.Stream: ...
+
+
+def pop_pycuda_context() -> Optional[contextlib.AbstractContextManager[cuda.Context]]: ...
 
 
 class Config:

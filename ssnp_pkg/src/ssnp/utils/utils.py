@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from functools import lru_cache
 from pycuda import gpuarray, driver as cuda
 
@@ -34,26 +35,42 @@ def get_stream_in_current():
     return get_stream(cuda.Context.get_current())
 
 
+__context_disabled = False
+
+
+@contextmanager
+def pop_pycuda_context():
+    global __context_disabled
+    if __context_disabled:  # do nothing if nested
+        yield
+        return
+    ctx = cuda.Context.get_current()
+    ctx.pop()
+    __context_disabled = True
+    yield ctx
+    __context_disabled = False
+    ctx.push()
+
+
 class Config:
     _res = None
     _n0 = 1.
     _xyz = None
     _lambda = None
-    _callbacks = None
 
     def __init__(self):
-        self.clear_updater()
+        self._callbacks = []
 
     @property
     def xyz(self):
         if self._xyz is None:
-            raise AttributeError("xyz is uninitialized")
+            raise AttributeError("xyz pixel sizes are uninitialized")
         return self._xyz
 
     @property
     def lambda0(self):
         if self._lambda is None:
-            raise AttributeError("wave length is uninitialized")
+            raise AttributeError("wavelength lambda0 is uninitialized")
         return self._lambda
 
     @property
@@ -78,8 +95,9 @@ class Config:
 
     @xyz.setter
     def xyz(self, value):
-        self._xyz = tuple(float(size_i) for size_i in value)
-        assert len(self._xyz) == 3
+        value = tuple(float(size_i) for size_i in value)
+        assert len(value) == 3
+        self._xyz = value
         self._try_calc_res()
 
     @lambda0.setter
@@ -115,7 +133,7 @@ class Config:
             self._callbacks.append(updater)
 
     def clear_updater(self):
-        self._callbacks = []
+        self._callbacks.clear()
 
     def _update(self, **kwargs):
         for i in self._callbacks:

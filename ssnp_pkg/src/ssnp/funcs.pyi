@@ -5,13 +5,12 @@ from pycuda.gpuarray import GPUArray
 from pycuda.elementwise import ElementwiseKernel
 from pycuda.driver import Stream, Function
 from pycuda.reduction import ReductionKernel
-from reikna.core.computation import ComputationCallable
 from .utils import Multipliers
 
 
 class Funcs:
-    _funcs_cache: Dict[tuple, Funcs]
-    shape: tuple
+    _initialized: bool
+    shape: tuple[int, int]
     batch: int
     res: tuple
     n0: float
@@ -20,7 +19,6 @@ class Funcs:
     kz_gpu: GPUArray
     eva: np.ndarray
     multiplier: Multipliers
-    _fft_callable: ComputationCallable
     # __temp_memory_pool: dict
     _prop_cache: dict
     reduce_sse_cr_krn: ReductionKernel
@@ -36,9 +34,9 @@ class Funcs:
     _fft_sk: callable
 
     def __init__(self, arr_like: GPUArray, res, n0, stream: Stream = None,
-                 fft_type: Literal["reikna", "skcuda"] = "reikna"): ...
+                 fft_type: Literal["reikna", "skcuda"] = "skcuda"): ...
 
-    def _initialized(self) -> bool: ...
+    def _init_kz(self, res, n0): ...
 
     @staticmethod
     def _compile_reikna_fft(shape, dtype, stream): ...
@@ -60,9 +58,6 @@ class Funcs:
     def scatter_g(self, *args) -> None: ...
 
     def _get_prop(self, dz): ...
-
-    # @staticmethod
-    # def get_temp_mem(arr_like: GPUArray, index=0): ...
 
     def reduce_sse(self, field: GPUArray, measurement: GPUArray) -> GPUArray: ...
 
@@ -121,3 +116,15 @@ class SSNPFuncs(Funcs):
     def scatter(self, u, u_d, n, dz) -> None: ...
 
     def scatter_g(self, u, n, ug, u_dg, ng, dz): ...
+
+
+class MLBFuncs(Funcs):
+    """Multi-Layer Born model"""
+
+    def _get_prop(self, dz): ...
+
+    def diffract(self, a, dz): ...
+
+    def pure_scatter(self, u, n, dz, u_s_out): ...
+
+    def merge_scatter(self, a, a_s, dz): ...

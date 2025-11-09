@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from pycuda import gpuarray
 from pycuda.gpuarray import GPUArray
 from ssnp import calc
-from ssnp.utils import param_check, Config
+from ssnp.utils import param_check, Config, ArrayPool
 from ssnp.utils.auto_gradient import Variable as Var, Operation, OperationTape, DataMissing
 from ssnp.ops import MulOp, FourierMulOp
 import logging
@@ -61,10 +61,10 @@ class BeamArray:
         else:
             self._u2 = None
         self.tape = OperationTape(total_ops)
-        self._array_pool = []
         self.shape = shape[-2:]
-        self._get_array_times = 0
         self._fft_funcs = calc.get_funcs(self._u1, stream=stream)
+        self.array_pool = ArrayPool(self._u1, gpuarray.empty_like,
+                                    unique_id=lambda arr: arr.ptr)
         self.stream = stream
 
     @property
@@ -97,35 +97,20 @@ class BeamArray:
 
         self._config.register_updater(update)
 
-    def _get_array(self):
-        if self._array_pool:
-            return self._array_pool.pop()
-        else:
-            self._get_array_times += 1
-            logging.info(f"get array times: {self._get_array_times}")
-            return gpuarray.empty_like(self._u1)
 
-    def recycle_array(self, arr):
-        try:
-            param_check(beam=self._u1, recycle=arr)
-            assert arr.dtype == self.dtype
-        except Exception as e:
-            warn("given array is incompatible and not recycled" + str(e), stacklevel=2)
-        else:
-            self._array_pool.append(arr)
 
     def apply_grad(self, grad1, grad2=None):
         if self._track:
             param_check(beam=self._u1, grad1=grad1)
             param_check(beam=self._u2, grad1=grad2)
-            u1g = self._get_array()
+            u1g = self.array_pool.get()
             u1g.set_async(grad1, stream=self.stream)
             if self._u2 is None:
                 op = Operation(Var(), [], "apply_1grad")
                 op.gradient = lambda: (u1g,)
             else:
                 op = Operation([Var(), Var()], [], "apply_2grad")
-                u2g = self._get_array()
+                u2g = self.array_pool.get()
                 u2g.set_async(grad2, stream=self.stream)
                 op.gradient = lambda: (u1g, u2g)
             self.tape.append(op)
@@ -200,11 +185,11 @@ class BeamArray:
             self.split_prop()
         if value is None:
             if self._u2 is not None:
-                self.recycle_array(self._u2)
+                self.array_pool.recycle(self._u2)
                 self._u2 = None
         else:
             if self._u2 is None:
-                self._u2 = self._get_array()
+                self._u2 = self.array_pool.get()
                 self.relation = BeamArray.BACKWARD
             self._u_setter(self._u2, value)
 
@@ -220,11 +205,11 @@ class BeamArray:
             self.merge_prop()
         if value is None:
             if self._u2 is not None:
-                self.recycle_array(self._u2)
+                self.array_pool.recycle(self._u2)
                 self._u2 = None
         else:
             if self._u2 is None:
-                self._u2 = self._get_array()
+                self._u2 = self.array_pool.get()
                 self.relation = BeamArray.DERIVATIVE
             self._u_setter(self._u2, value)
 
@@ -341,7 +326,8 @@ class BeamArray:
             op = Operation(Var(), Var(), "conj")
             op.set_funcs(
                 forward=lambda var: Var(
-                    data=self._fft_funcs.conj(var.data, out=self._get_array() if var.bound else None)
+                    data=self._fft_funcs.conj(var.data,
+                                              out=self.array_pool.get() if var.bound else None)
                 ),
                 gradient=lambda ug: [self._fft_funcs.conj(ug)]
             )
@@ -351,21 +337,22 @@ class BeamArray:
     def mse_loss(self, forward=None, *, backward=None):
         # parameter check
         if self._u2 is None and backward is not None:
-            warn("computing mse loss for forward only beam, backward part is ignored")
-            backward = None
+            raise ValueError("cannot specify backward for the mse_loss of a forward-only beam")
         if forward is None and backward is None:
-            raise TypeError(f"mse_loss needs at least 1 argument")
+            raise TypeError(f"{type(self).__name__}.mse_loss takes at least 1 argument")
         # mse (and grad) computation
         loss = 0
         ufg = ubg = None
         if forward is not None:
             loss += calc.reduce_mse(self.forward, forward, self.stream)
             if self._track:
-                ufg = calc.reduce_mse_grad(self.forward, forward, self._get_array(), self.stream)
+                ufg = calc.reduce_mse_grad(self.forward, forward,
+                                           output=self.array_pool.get(), stream=self.stream)
         if backward is not None:
             loss += calc.reduce_mse(self.backward, backward, self.stream)
             if self._track:
-                ubg = calc.reduce_mse_grad(self.backward, backward, self._get_array(), self.stream)
+                ubg = calc.reduce_mse_grad(self.backward, backward,
+                                           output=self.array_pool.get(), stream=self.stream)
         # append mse op to tape
         if self._track:
             if self._u2 is None:
@@ -374,9 +361,11 @@ class BeamArray:
             else:
                 op = Operation([Var('uf'), Var('ub')], [], "mse_fb")
                 if ufg is None:
-                    ufg = self._get_array().fill(0, self.stream)
+                    ufg = self.array_pool.get()
+                    ufg.fill(0, self.stream)
                 if ubg is None:
-                    ubg = self._get_array().fill(0, self.stream)
+                    ubg = self.array_pool.get()
+                    ubg.fill(0, self.stream)
                 op.gradient = lambda: (ufg, ubg)
             self.tape.append(op)
         return loss
@@ -384,13 +373,14 @@ class BeamArray:
     def forward_mse_loss(self, measurement):
         loss = calc.reduce_mse(self.forward, measurement)
         if self._track:
-            ufg = calc.reduce_mse_grad(self._u1, measurement, self._get_array(), self.stream)
+            ufg = calc.reduce_mse_grad(self._u1, measurement,
+                                       output=self.array_pool.get(), stream=self.stream)
             if self._u2 is None:
                 op = Operation(Var(), [], "mse")
                 op.gradient = lambda: (ufg,)
             else:
                 op = Operation([Var(), Var()], [], "mse")
-                ubg = self._get_array()
+                ubg = self.array_pool.get()
                 ubg.fill(0, self.stream)
                 op.gradient = lambda: (ufg, ubg)
             self.tape.append(op)
@@ -400,15 +390,15 @@ class BeamArray:
         # one direction only
         assert self._u2 is None
         assert measurement.dtype == np.float64
-        batch_abs = calc.abs_c2c(self._u1, output=self._get_array(), stream=self.stream)
+        batch_abs = calc.abs_c2c(self._u1, output=self.array_pool.get(), stream=self.stream)
         batch_abs **= 2  # TODO: change to sqr/sqrt to improve performance
-        summed_abs = self._get_array()
+        summed_abs = self.array_pool.get()
         calc.sum_batch(batch_abs, summed_abs[0], stream=self.stream)
         summed_abs[0] **= 0.5
         loss = calc.reduce_mse(summed_abs[0], measurement)
         if self._track:
             # 2 * (sqrt(sum_(u^2)) - m) / sqrt(sum_(u^2)) * u
-            u1g = self._get_array()
+            u1g = self.array_pool.get()
             temp = u1g
             temp[0].set_async(summed_abs[0], self.stream)
             temp[0] += 1.e-12
@@ -421,28 +411,28 @@ class BeamArray:
             op = Operation(Var(), [], "midt_batch_mse")
             op.gradient = lambda: (u1g,)
             self.tape.append(op)
-        self.recycle_array(batch_abs)
-        self.recycle_array(summed_abs)
+        self.array_pool.recycle(batch_abs)
+        self.array_pool.recycle(summed_abs)
         return loss
 
     def _parse(self, info, dz, n, track):
         def step(_dz, _n):
             if info[0] == 'bpm':
-                calc.bpm_step(info[1], _dz, _n, config=self._config)
+                calc.bpm_step(info[1], _dz, _n, config=self._config, stream=self.stream)
                 if track:
                     if _n is not None and next(self.tape.save_hint):
-                        u_save = self._get_array()
-                        u_save.set(info[1])
+                        u_save = self.array_pool.get()
+                        u_save.set_async(info[1], self.stream)
                     else:
                         u_save = None
                     self.tape.append(self._bpm_op(Var('u', u_save), _n, _dz))
 
             elif info[0] == 'ssnp':
-                calc.ssnp_step(info[1], info[2], _dz, _n, config=self._config)
+                calc.ssnp_step(info[1], info[2], _dz, _n, config=self._config, stream=self.stream)
                 if track:
                     if _n is not None and next(self.tape.save_hint):
-                        u_save = self._get_array()
-                        ud_save = self._get_array()
+                        u_save = self.array_pool.get()
+                        ud_save = self.array_pool.get()
                         u_save.set_async(info[1], self.stream)
                         ud_save.set_async(info[2], self.stream)
                     else:
@@ -468,13 +458,6 @@ class BeamArray:
             else:
                 for ni in n:
                     step(dz, ni)
-
-    def __del__(self):
-        for arr in self._array_pool:
-            arr.gpudata.free()
-        self._u1.gpudata.free()
-        if isinstance(self._u2, GPUArray):
-            self._u2.gpudata.free()
 
     def __repr__(self):
         if self._u2:
@@ -533,13 +516,13 @@ class BeamArray:
         def forward(u_in: Var):
             if n_data is not None:
                 if u_in.bound:
-                    u_out.data = self._get_array()
+                    u_out.data = self.array_pool.get()
                 else:
                     u_out.data = u_in.data
                 u_return = u_out
             else:
                 if u_in.bound:
-                    u_return = Var(u_in.tag, self._get_array())
+                    u_return = Var(u_in.tag, self.array_pool.get())
                 else:
                     u_return = u_in
             calc.bpm_step(u_in.data, dz, n_data, output=u_return.data, config=self._config, stream=self.stream)
@@ -547,7 +530,7 @@ class BeamArray:
 
         def clear():
             if u_out.has_data():
-                self.recycle_array(u_out.data)
+                self.array_pool.recycle(u_out.data)
 
         op = Operation(vars_in, u_out, "bpm")
         op.set_funcs(forward, gradient, clear)
@@ -574,12 +557,11 @@ class BeamArray:
         def forward(*u_in):
             if n_data is not None:  # scatter: save in u_out, can reuse mem if not bound
                 for i, ui in enumerate(u_in):
-                    u_out[i].data = self._get_array() if ui.bound else ui.data
+                    u_out[i].data = self.array_pool.get() if ui.bound else ui.data
                 u_return = u_out
             else:  # no scatter: not save in u_out, create new unbound if ui is bound
-                u_return = [None, None]
-                for i, ui in enumerate(u_in):
-                    u_return[i] = Var(ui.tag, self._get_array()) if ui.bound else ui
+                u_return = [Var(ui.tag, self.array_pool.get()) if ui.bound else ui
+                            for ui in u_in]
             calc.ssnp_step(u_in[0].data, u_in[1].data, dz, n_data,
                            output=[u_return[0].data, u_return[1].data],
                            config=self._config, stream=self.stream)
@@ -588,7 +570,7 @@ class BeamArray:
         def clear():
             for v in u_out:
                 if v.has_data():
-                    self.recycle_array(v.data)
+                    self.array_pool.recycle(v.data)
 
         vars_in = [Var('u_in'), Var('ud_in')]
         if n_data is not None:
@@ -616,11 +598,11 @@ class BeamArray:
                         assert out[vi.tag] is None  # not support out container
                         arr_out.append(go)
                     else:
-                        self.recycle_array(go)
+                        self.array_pool.recycle(go)
                         arr_out.append(None)  # only a placeholder
                 else:
                     arr_out.append(go)
-            return arr_out + [self._get_array().fill(0) for _ in range(li - lo)]
+            return arr_out + [self.array_pool.get().fill(0) for _ in range(li - lo)]
 
         # TODO: fix forward & clear
         # def forward(*v_in):
@@ -639,3 +621,12 @@ class BeamArray:
         op.gradient = gradient
         # op.set_funcs(forward, gradient, clear)
         return op
+
+    # Deprecated alias
+    def recycle_array(self, arr):
+        warn("use BeamArray.array_pool.recycle(arr) instead", DeprecationWarning)
+        self.array_pool.recycle(arr)
+
+    def _get_array(self):
+        warn("use BeamArray.array_pool.get() instead", DeprecationWarning)
+        return self.array_pool.get()
