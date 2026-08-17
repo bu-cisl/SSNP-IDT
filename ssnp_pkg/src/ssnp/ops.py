@@ -44,16 +44,16 @@ class MulOp(Operation):
             grad_other = calc.u_mul(ug[0], u1_var.data, out=u1_var.data, conj=True, stream=self._beam.stream)
             u1_var.data = None  # memory is moved
             if self._bi_dir:
-                # ug[1] * conj(u2_save) -> u2_save, then added to grad_other and recycled
+                # ug[1] * conj(u2_save) -> u2_save, then added to grad_other
                 u2_var = self.vars_in[1]
                 grad_other += calc.u_mul(ug[1], u2_var.data, out=u2_var.data, conj=True, stream=self._beam.stream)
-                self._beam.array_pool.recycle(u2_var.data)
                 u2_var.data = None
             self._taped_in_all_saved = False
             # sum axis for grad_other if doing broadcast in forward
             if isinstance(self._other, Complex):  # number: return number in cpu memory
-                self._beam.array_pool.recycle(grad_other)
+                grad_other_arr = grad_other
                 grad_other = gpuarray.sum(grad_other, stream=self._beam.stream).get()
+                grad_other_arr.dispose()
                 if out_container is not None:
                     raise ValueError("cannot assign to multiplier gradient container when multiplier is a number")
             elif self._beam.batch is None:  # elementwise: return array or copy to out_container
@@ -61,7 +61,7 @@ class MulOp(Operation):
                     param_check(multiplier_gradient=grad_other, multiplier_output=out_container)
                     assert out_container.dtype == grad_other.dtype
                     out_container.set(grad_other)
-                    self._beam.array_pool.recycle(grad_other)
+                    grad_other.dispose()
                     grad_other = out_container
             else:  # batch: sum to allocated array or out_container
                 if out_container is None:
@@ -71,21 +71,15 @@ class MulOp(Operation):
                     param_check(multiplier_gradient=grad_other[0], multiplier_output=out_container)
                     assert out_container.dtype == grad_other.dtype
                     out_arr = out_container
-                self._beam.array_pool.recycle(grad_other)
+                batched_grad = grad_other
                 grad_other = calc.sum_batch(grad_other, output=out_arr, stream=self._beam.stream)
+                batched_grad.dispose()
         else:
             grad_other = None
 
         grad = [calc.u_mul(ug_i, self._other, conj=True, stream=self._beam.stream) for ug_i in ug]
         grad.append(grad_other)
         return grad
-
-    def clear(self):
-        if (u1_save := self.vars_in[0].data) is not None:
-            self._beam.array_pool.recycle(u1_save)
-        if self._bi_dir:
-            if (u2_save := self.vars_in[1].data) is not None:
-                self._beam.array_pool.recycle(u2_save)
 
 
 class FourierMulOp(MulOp):
@@ -103,3 +97,37 @@ class FourierMulOp(MulOp):
         # otherwise iFFT is not applied to the result
         with self._fourier(ug_list[0]), self._fourier(ug_list[1]) if self._bi_dir else nullcontext():
             return super().gradient(*ug_list, out=out)
+
+
+class MSELossOp(Operation):
+    def __init__(self, beam, other_forward, other_backward):
+        self._beam = beam
+        # When other_forward / backward is missing, the gradient of the corresponding beam component is 0.
+        # For bi-direction, len(grads) = 2, otherwise 1 for forward only
+        self._grads = [
+            calc.reduce_mse_grad(b_arr, o_arr, output=beam.array_pool.get(), stream=beam.stream)
+            if o_arr is not None else beam.array_pool.get().fill(0, stream=beam.stream)
+            for b_arr, o_arr in [[beam.forward, other_forward], [beam.backward, other_backward]]
+            if b_arr is not None
+        ]
+
+        # Note that other_forward / backward is not marked as external args since getting the
+        # gradient for measurements seems meaningless
+        vars_in = [Var('uf')]
+        op_name = "mse_f"
+        if beam.backward is not None:
+            vars_in.append(Var('ub'))
+            op_name = "mse_fb"
+        super().__init__(vars_in, [], op_name)
+
+    def gradient(self, out=None):
+        if out:  # copy and replace the array
+            if 'uf' in out:
+                if out['uf'] is None:
+                    out['uf'] = self._beam.array_pool.get()
+                out['uf'].set_async(self._grads[0], stream=self._beam.stream)
+            if 'ub' in out:
+                if out['ub'] is None:
+                    out['ub'] = self._beam.array_pool.get()
+                out['ub'].set_async(self._grads[1], stream=self._beam.stream)
+        return self._grads

@@ -3,7 +3,7 @@ from functools import lru_cache
 from pycuda import gpuarray, driver as cuda
 
 
-def param_check(**kwargs):
+def param_check(*, _expected_type=gpuarray.GPUArray, **kwargs):
     name0 = None
     shape0 = None
     for name in kwargs:
@@ -11,8 +11,8 @@ def param_check(**kwargs):
         if arr is None:
             continue
         # type check
-        if not isinstance(arr, gpuarray.GPUArray):
-            raise TypeError(f"'{name}' is not a GPUArray")
+        if not isinstance(arr, _expected_type):
+            raise TypeError(f"'{name}' is not a {_expected_type}")
         # shape check
         if name0 is None:
             name0 = name
@@ -47,18 +47,19 @@ def pop_pycuda_context():
     ctx = cuda.Context.get_current()
     ctx.pop()
     __context_disabled = True
-    yield ctx
-    __context_disabled = False
-    ctx.push()
+    try:
+        yield ctx
+    finally:
+        ctx.push()
+        __context_disabled = False
 
 
 class Config:
-    _res = None
-    _n0 = 1.
-    _xyz = None
-    _lambda = None
-
     def __init__(self):
+        self._res = None
+        self._n0 = 1.
+        self._xyz = None
+        self._lambda = None
         self._callbacks = []
 
     @property
@@ -88,15 +89,17 @@ class Config:
         # if self._res is not None:
         #     warn(f"resetting res value from {self._res}")
         value = tuple(float(res_i) for res_i in value)
+        if len(value) != 3:
+            raise ValueError("res can only be assigned with an iterable of 3 floats")
         if self._res != value:
-            assert len(value) == 3
             self._update(attr='res', old=self._res, new=value)
             self._res = value
 
     @xyz.setter
     def xyz(self, value):
         value = tuple(float(size_i) for size_i in value)
-        assert len(value) == 3
+        if len(value) != 3:
+            raise ValueError("xyz can only be assigned with an iterable of 3 floats")
         self._xyz = value
         self._try_calc_res()
 
@@ -122,14 +125,14 @@ class Config:
 
     def _try_n0fix_res(self, new_value):
         try:
-            value = (res_i / self._n0 * new_value for res_i in self.res)
-            self._res = tuple(float(res_i) for res_i in value)
+            self._res = tuple([float(res_i / self._n0 * new_value) for res_i in self.res])
         except AttributeError:
             pass
 
     def register_updater(self, updater):
         if updater is not None:
-            assert callable(updater), "updater function is not callable"
+            if not callable(updater):
+                raise ValueError("updater function is not callable")
             self._callbacks.append(updater)
 
     def clear_updater(self):
@@ -143,11 +146,6 @@ class Config:
         for attr in ('n0', 'xyz', 'lambda0', 'res'):  # the order is important
             if value := kwargs.pop(attr, None):
                 setattr(self, attr, value)
-        # for key in kwargs:
-        #     if key == "res":
-        #         self.res = kwargs[key]
-        #     else:
-        #         raise TypeError(f"'{key}' is invalid as a configuration item")
 
     def __copy__(self):
         cp = type(self)()

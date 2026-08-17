@@ -20,11 +20,12 @@ ssnp.config.set(xyz=(0.1, 0.2, 0.3), lambda0=0.632)
 class TestBeamSetUp(TestCase):
     def setUp(self):
         self.ones_cpu = np.ones(dtype=np.complex128, shape=(128, 128))
-        self.ones_gpu = pycuda.gpuarray.to_gpu(self.ones_cpu)
+        self.ones_gpu = gpuarray.to_gpu(self.ones_cpu)
 
     def test_defaults(self):
         beam = BeamArray(self.ones_gpu)
         self.assertEqual(beam.dtype, np.complex128)
+
 
 class TestBeamArraySingle(TestCase):
     def setUp(self) -> None:
@@ -39,6 +40,18 @@ class TestBeamArraySingle(TestCase):
         self.assertIsInstance(b, np.ndarray)
         self.assertEqual(a.shape, b.shape)
         self.assertLessEqual(np.linalg.norm(a - b), delta)
+
+    def random_like(self, arr, dtype=None):
+        if dtype is None:
+            dtype = arr.dtype
+        match dtype:
+            case np.float32 | np.float64:
+                return self.rng.random(arr.shape, dtype)
+            case np.complex64 | np.complex128:
+                dtype_f = np.finfo(dtype).dtype
+                return self.rng.random(arr.shape, dtype_f) + 1j * self.rng.random(arr.shape, dtype_f)
+            case _:
+                raise NotImplementedError(f"random_floating_like does not support {arr.dtype}")
 
     def test_config(self):
         beam = self.beam
@@ -97,69 +110,146 @@ class TestBeamArraySingle(TestCase):
     #
 
     def test_mse_loss(self):
-        rand = lambda: self.rng.random(self.beam.forward.shape, np.float64)
+        DELTA = 1e-12
 
-        # forward only beam
-        arr_beam_f = rand() + 1j * rand()
+        def _gradient_cpu(arr_cmplx_field, arr_meas):
+            self.assertEqual(arr_cmplx_field.dtype, np.complex128)
+            if arr_meas.dtype == np.float64:
+                grad_amp = 2 * (np.abs(arr_cmplx_field) - arr_meas) / arr_cmplx_field.size
+                # circumvent divided by 0 problem
+                grad_ang = arr_cmplx_field.copy()
+                grad_ang[arr_cmplx_field == 0] = 1
+                grad_ang /= np.abs(grad_ang)
+                grad_ang[arr_cmplx_field == 0] = 0
+                return grad_amp * grad_ang
+            if arr_meas.dtype == np.complex128:
+                return 2 * (arr_cmplx_field - arr_meas) / arr_cmplx_field.size
+            self.fail(f"bad meas type {arr_meas.dtype}")
+
+        def _do_test_1_dir(meas):
+            cmplx_field = self.beam.forward.get()
+            meas_gpu = gpuarray.to_gpu(meas)
+            with self.beam.track():
+                loss = self.beam.mse_loss(meas_gpu)
+            if meas.dtype == np.complex128:
+                diff = np.abs(cmplx_field - meas)
+            elif meas.dtype == np.float64:
+                diff = np.abs(cmplx_field) - meas
+            else:
+                self.fail(f"bad meas type {meas.dtype}")
+            self.assertAlmostEqual(loss, np.sum(diff ** 2) / meas.size)
+            grad_ = self.beam.tape.collect_gradient(['change:u1_in'])['change:u1_in']
+            self.assertEqual(len(grad_), 1)
+            ufg_ = grad_[0].get()
+            self.assertArrayEqual(ufg_, _gradient_cpu(cmplx_field, meas), DELTA)
+
+        def _do_test_2_dir(meas):
+            meas_gpu = gpuarray.to_gpu(meas)
+            with self.beam.track():
+                self.beam.merge_prop()
+                self.beam *= 2
+                loss = self.beam.mse_loss(meas_gpu)
+            cmplx_field = self.beam.forward.get()
+            if meas.dtype == np.complex128:
+                diff = np.abs(cmplx_field - meas)
+            elif meas.dtype == np.float64:
+                diff = np.abs(cmplx_field) - meas
+            else:
+                self.fail(f"bad meas type {meas.dtype}")
+            self.assertAlmostEqual(loss, np.sum(diff ** 2) / meas.size)
+            grad = self.beam.tape.collect_gradient(['mse_fb:uf', 'mse_fb:ub'])
+            self.assertEqual(len(grad['mse_fb:uf']), 1)
+            ufg = grad['mse_fb:uf'][0].get()
+            self.assertArrayEqual(ufg, _gradient_cpu(cmplx_field, meas), DELTA)
+            self.assertEqual(len(grad['mse_fb:ub']), 1)
+            ubg = grad['mse_fb:ub'][0].get()
+            self.assertArrayEqual(ubg, np.zeros_like(ubg), DELTA)
+
+        # make forward only beam
+        arr_beam_f = self.random_like(self.beam.forward)
+        arr_beam_f[1, 2:4] = 0
         self.beam.forward = arr_beam_f
-        # real forward
-        arr_meas_f = rand()
-        forward = gpuarray.to_gpu(arr_meas_f)
-        with self.beam.track():
-            loss = self.beam.mse_loss(forward)
-        self.assertAlmostEqual(loss, np.linalg.norm(np.abs(arr_beam_f) - arr_meas_f) ** 2)
-        grad = self.beam.tape.collect_gradient(['uf', 'ub'])
-        ufg = np.squeeze(np.stack([uf.get() for uf in grad['uf']]))
-        self.assertArrayEqual(ufg, 2 * (np.abs(arr_beam_f) - arr_meas_f) * arr_beam_f / np.abs(arr_beam_f), 1e-7)
-        self.assertEqual(len(grad['ub']), 0)
 
-        # complex forward
-        arr_meas_f = rand() + 1j * rand()
-        forward = gpuarray.to_gpu(arr_meas_f)
-        with self.beam.track():
-            loss = self.beam.mse_loss(forward)
-        self.assertAlmostEqual(loss, np.linalg.norm(arr_beam_f - arr_meas_f) ** 2)
-        grad = self.beam.tape.collect_gradient(['uf'])
-        ufg = np.squeeze(np.stack([uf.get() for uf in grad['uf']]))
-        self.assertArrayEqual(ufg, 2 * (arr_beam_f - arr_meas_f), 1e-7)
+        # test1: real forward measurement
+        arr_meas_f_re = self.random_like(self.beam.forward, np.float64)
+        arr_meas_f_re[1, 3:5] = 0
+        _do_test_1_dir(arr_meas_f_re)
 
-        # bi-dir beam
-        arr_beam_b = rand() + 1j * rand()
+        # test2: complex forward measurement
+        arr_meas_f_cmp = self.random_like(self.beam.forward)
+        arr_meas_f_cmp[1, 3:5] = 0
+        _do_test_1_dir(arr_meas_f_cmp)
+
+        # test3: bi-dir beam with single dir measurement
+        arr_beam_b = self.random_like(self.beam.forward)
         self.beam.backward = arr_beam_b
-        self.beam.merge_prop()
-        # complex forward
-        arr_meas_f = rand() + 1j * rand()
-        forward = gpuarray.to_gpu(arr_meas_f)
-        with self.beam.track():
-            loss = self.beam.mse_loss(forward)
-            self.assertAlmostEqual(loss, np.linalg.norm(arr_beam_f - arr_meas_f) ** 2)
-        grad = self.beam.tape.collect_gradient(['uf'])
-        ufg = np.squeeze(np.stack([uf.get() for uf in grad['uf']]))
-        self.assertArrayEqual(ufg, 2 * (arr_beam_f - arr_meas_f), 1e-7)
+
+        # forward-only measurement: real & complex
+        _do_test_2_dir(arr_meas_f_re)
+        _do_test_2_dir(arr_meas_f_cmp)
+
+        # TODO: test4: bi-dir measurement
 
     def test___imul__(self):
-        def assert_minmax(arr, x):
-            self.assertAlmostEqual(np.max(arr), x)
-            self.assertAlmostEqual(np.min(arr), x)
-
-        fwd = self.beam.forward
+        DELTA = 1e-12
+        beam = self.beam
+        arr = self.random_like(beam.forward)
         # number
-        self.beam *= 1.5j
-        assert_minmax(fwd.get(), 1.5j)
+        self.beam.forward = arr
+        mul_number = np.complex128(1.23 + 4.56j)
+        beam *= mul_number
+        self.assertArrayEqual(beam.forward.get(), arr * mul_number, DELTA)
         # real array
-        multiplier = gpuarray.empty_like(fwd, dtype=np.float64)
-        multiplier.fill(2)
-        self.beam *= multiplier
-        assert_minmax(fwd.get(), 3j)
+        self.beam.forward = arr
+        mul_real = self.random_like(beam.forward, np.float64)
+        mul_gpu_real = gpuarray.to_gpu(mul_real)
+        self.beam *= mul_gpu_real
+        self.assertArrayEqual(beam.forward.get(), arr * mul_real, DELTA)
         # complex array & memory not change
+        self.beam.forward = arr
+        fwd = self.beam.forward
         self.beam *= fwd
-        assert_minmax(fwd.get(), -9)
+        self.assertArrayEqual(beam.forward.get(), arr ** 2, DELTA)
         self.assertIs(fwd, self.beam.forward)
         # reject numpy array
-        np_arr = np.empty_like(fwd.get())
-        with self.assertRaisesRegex(TypeError, "'.*' is not a GPUArray"):
-            self.beam *= np_arr
+        with self.assertRaisesRegex(TypeError, "is not a .*GPUArray"):
+            self.beam *= arr
 
     #
     # def test_a_mul(self):
     #     self.fail()
+
+    def test_conj(self):
+        beam = self.beam
+        arr = self.random_like(beam.forward)
+        beam.forward = arr
+
+        # Basic
+        beam.conj()
+        self.assertArrayEqual(beam.forward.get(), arr.conj())
+        beam.conj()
+        self.assertArrayEqual(beam.forward.get(), arr)
+
+        # Reject bi-dir arr and do nothing
+        arr2 = self.random_like(beam.forward)
+        beam.backward = arr2
+        with self.assertRaises(NotImplementedError):
+            beam.conj()
+        self.assertArrayEqual(beam.forward.get(), arr)
+        self.assertArrayEqual(beam.backward.get(), arr2)
+        beam.backward = None
+
+        # Test track
+        beam.forward = arr
+        with beam.track():
+            beam.conj()
+            self.assertArrayEqual(beam.forward.get(), arr.conj())
+            other = beam.array_pool.get()
+            other.set(arr2)
+            beam.mse_loss(other)
+        fwd_grad = beam.tape.collect_gradient(["u1_in"])["u1_in"]
+        self.assertEqual(len(fwd_grad), 1)
+        grad_cpu = fwd_grad[0].get()
+        self.assertArrayEqual(grad_cpu, (arr - arr2.conj()) / arr.size * 2, 1e-12)
+        # note: f(z) = abs(conj(z) - z2) ** 2 / size = abs(z - conj(z2)) ** 2 / size
+        #   G(f, z) = 2 (z - conj(z2)) / size k

@@ -1,4 +1,4 @@
-from typing import Literal, Union, Optional, Sequence
+from typing import Literal, Union, Optional, Sequence, overload
 from pycuda.driver import Stream
 from ssnp.funcs import BPMFuncs, SSNPFuncs, Funcs, MLBFuncs
 from pycuda.gpuarray import GPUArray
@@ -29,7 +29,8 @@ def mlb_step(u: GPUArray, temp_like_u: Optional[GPUArray], dz: Real, n: GPUArray
              config: Config = None, stream: Stream = None): ...
 
 
-def reduce_mse(u: GPUArray, measurement: GPUArray, stream: Stream = None) -> np.double: ...
+def reduce_mse(u: GPUArray, measurement: GPUArray, *,
+               stream: Stream = None, temp_arr: GPUArray = None) -> np.double: ...
 
 
 def reduce_mse_grad(u: GPUArray, measurement: GPUArray, output: GPUArray = None, stream: Stream = None) -> GPUArray: ...
@@ -72,7 +73,29 @@ def split_grad(ug: GPUArray, u_dg: GPUArray, config: Config = None,
                copy: bool = False, stream: Stream = None) -> tuple[GPUArray, GPUArray]: ...
 
 
+@overload
 def get_funcs(arr_like: GPUArray, config: Config = None, *,
-              model: Literal['ssnp', 'bpm', 'any', 'BPM', 'SSNP', 'mlb', 'Any', 'ANY'] = 'any',
+              model: Literal['any', 'Any', 'ANY'] = 'any',
               stream: Stream = None,
               fft_type: Literal["reikna", "skcuda"] = "skcuda") -> Union[BPMFuncs, SSNPFuncs, MLBFuncs, Funcs]: ...
+
+
+@overload
+def get_funcs(arr_like: GPUArray, config: Config = None, *,
+              model: Literal['ssnp', 'SSNP'],
+              stream: Stream = None,
+              fft_type: Literal["reikna", "skcuda"] = "skcuda") -> SSNPFuncs: ...
+
+
+@overload
+def get_funcs(arr_like: GPUArray, config: Config = None, *,
+              model: Literal['bpm', 'BPM'],
+              stream: Stream = None,
+              fft_type: Literal["reikna", "skcuda"] = "skcuda") -> BPMFuncs: ...
+
+
+@overload
+def get_funcs(arr_like: GPUArray, config: Config = None, *,
+              model: Literal['mlb', 'MLB'],
+              stream: Stream = None,
+              fft_type: Literal["reikna", "skcuda"] = "skcuda") -> MLBFuncs: ...

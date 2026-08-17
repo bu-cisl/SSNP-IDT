@@ -18,10 +18,10 @@ if sys.version_info.major < 3:
 
 import warnings
 
-if sys.version_info < (3, 8):
-    warnings.warn("Untested python version. Please use python>=3.8")
+if sys.version_info < (3, 12):
+    warnings.warn("Untested python version. Please use python>=3.12")
 
-VERSION = '1.0.2-dev'
+VERSION = '1.1.0'
 
 import ssnp.utils.init_helper
 

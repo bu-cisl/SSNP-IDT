@@ -1,4 +1,4 @@
-from typing import Literal, Dict
+from typing import Literal, Callable
 
 import numpy as np
 from pycuda.gpuarray import GPUArray
@@ -30,8 +30,8 @@ class Funcs:
     mul_krn: ElementwiseKernel
     sum_cmplx_batch_krn: ElementwiseKernel
     sum_double_batch_krn: ElementwiseKernel
-    _fft_reikna: callable
-    _fft_sk: callable
+    _fft_reikna: Callable
+    _fft_sk: Callable
 
     def __init__(self, arr_like: GPUArray, res, n0, stream: Stream = None,
                  fft_type: Literal["reikna", "skcuda"] = "skcuda"): ...
@@ -59,7 +59,7 @@ class Funcs:
 
     def _get_prop(self, dz): ...
 
-    def reduce_sse(self, field: GPUArray, measurement: GPUArray) -> GPUArray: ...
+    def reduce_sse(self, field: GPUArray, measurement: GPUArray, temp_arr: GPUArray = None) -> GPUArray: ...
 
     def mse_grad(self, field: GPUArray, measurement: GPUArray, gradient: GPUArray): ...
 
@@ -70,14 +70,6 @@ class Funcs:
 
     def op(self, x: GPUArray, operator: Literal["+", "-", "*", "/"], y: GPUArray, *,
            out: GPUArray = None, batchwise: bool = True, name: str = None, y_func: str = None): ...
-
-    def conj(self, arr: GPUArray, out: GPUArray = None) -> None:
-        """
-        copied from GPUArray.conj(self), do conj in-place
-        :param arr: the input GPUArray to apply conjugate
-        :param out: the output GPUArray. None for in-place operation (Default)
-        :return: out
-        """
 
 
 class BPMFuncs(Funcs):

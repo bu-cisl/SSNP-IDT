@@ -121,12 +121,12 @@ def mlb_step(u, temp_like_u, dz, n=None, config=None, stream=None):
     u = funcs.ifft(a)
     return u
 
-def reduce_mse(u, measurement, stream=None):
+def reduce_mse(u, measurement, *, stream=None, temp_arr=None):
     param_check(u=u, measurement=measurement)
     if u.dtype != np.complex128:
         raise ValueError(f"u dtype {u.dtype} is incompatible")
     funcs = get_funcs(u, model="any", stream=stream)
-    result = funcs.reduce_sse(u, measurement)
+    result = funcs.reduce_sse(u, measurement, temp_arr=temp_arr)
     if stream is None:
         return result.get() / u.size
     else:

@@ -162,7 +162,7 @@ def read(source, dtype=None, shape=None, *, scale=1., gpu=False, pagelocked=Fals
     return output_arr
 
 
-def tiff_write(path, arr, *, scale=1, pre_operator: callable = None, dtype=np.uint16,
+def tiff_write(path, arr, *, scale=1, pre_operator = None, dtype=np.uint16,
                compression='zlib', photometric=None):
     from tifffile import TiffWriter
     arr = np.squeeze(arr)

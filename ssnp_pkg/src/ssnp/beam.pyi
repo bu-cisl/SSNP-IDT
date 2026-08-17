@@ -4,7 +4,7 @@ from pycuda.gpuarray import GPUArray
 from pycuda.driver import Stream
 from typing import Literal, Optional, Union, Iterable
 import numpy as np
-from ssnp.utils import Multipliers, Config, ArrayPool
+from ssnp.utils import Multipliers, Config, ManagedArrayPool
 from ssnp.funcs import Funcs
 from ssnp.utils.auto_gradient import OperationTape, Variable
 
@@ -27,24 +27,22 @@ class BeamArray:
     field: G_PRO
     derivative: Optional[G_PRO]
     multiplier: Multipliers
-    array_pool: ArrayPool
+    array_pool: ManagedArrayPool
     tape: OperationTape
     ops_number: dict
     _fft_funcs: Funcs
     batch: Optional[int]
-    shape: tuple[int, ...]
+    shape: tuple[int, int]
     stream: Stream
 
-    def __init__(self, u1: ARR, u2: ARR = None, relation: Literal[0, 1] = DERIVATIVE, total_ops: int = 0,
-                 stream: Stream = None): ...
+    def __init__(self, u1: ARR, u2: ARR = None, relation: Literal[0, 1] = DERIVATIVE,
+                 total_ops: int = 0, stream: Stream = None): ...
 
     def _parse(self, info, dz, n, track: bool): ...
 
     def ssnp(self, dz, n: GPUArray = None, *, track: bool = False): ...
 
     def bpm(self, dz, n: GPUArray = None, *, track: bool = False): ...
-
-    def forward_mse_loss(self, measurement: GPUArray): ...
 
     def midt_batch_mse_loss(self, measurement): ...
 

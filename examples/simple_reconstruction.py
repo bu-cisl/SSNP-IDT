@@ -39,7 +39,7 @@ for step in range(5):
             beam.ssnp(1, n)
             beam.ssnp(-len(n) / 2)
             beam.a_mul(pupil)
-            loss = beam.forward_mse_loss(mea[num])
+            loss = beam.mse_loss(mea[num])
         print(f"dir {num}, {loss = :f}")
         beam.n_grad(ng)
         ng_total += ng

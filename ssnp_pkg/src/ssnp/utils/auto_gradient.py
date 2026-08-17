@@ -26,11 +26,6 @@ class Variable:
     external: bool = False
     bound: bool = False
 
-    # Deprecated: confusing to test if data is saved
-    def __bool__(self):
-        warn("Variable.__bool__ is deprecated, use Variable.has_data() instead", DeprecationWarning, stacklevel=2)
-        return self.has_data()
-
     def has_data(self):
         return self.data is not None
 
@@ -41,18 +36,15 @@ class DataMissing(Exception):
 
 @dataclass
 class Operation:
-    vars_in: Union[Variable, Sequence[Variable]]
-    vars_out: Union[Variable, Sequence[Variable]]
+    vars_in: Sequence[Variable]
+    vars_out: Sequence[Variable]
     name: str = None
-    taped_len = None
-    _taped_out: Optional[list[Variable]] = field(default=None, init=False, repr=False)
-    _taped_in_all_saved: bool = field(default=False, init=False, repr=False)
 
     # vars_out_saved = True
     # tag_pos = {}
 
     def __post_init__(self):
-        tl = [0, 0]
+        tl_in = tl_out = 0
         if isinstance(self.vars_in, Variable):
             self.vars_in = (self.vars_in,)
         if isinstance(self.vars_out, Variable):
@@ -60,12 +52,12 @@ class Operation:
 
         for v in self.vars_in:
             v.bound = True
-            tl[0] += not v.external
+            tl_in += not v.external
         for v in self.vars_out:
             v.bound = True
-            tl[1] += not v.external
-        self.update_saved()
-        self.taped_len = tl
+            tl_out += not v.external
+        self.update_saved()  # defines _taped_out, _taped_in_all_saved
+        self.taped_len = tl_in, tl_out
 
     def backprop(self, *grad_out_data, **kwargs):
         # assert len(grad_out_data) == self.taped_len[1], "grad_out length error"
@@ -129,7 +121,11 @@ class Operation:
         raise NotImplementedError(f"'{self.name}' operation cannot backprop")
 
     def clear(self):
-        pass
+        for v in self.vars_in:
+            v.data = None
+        for v in self.vars_out:
+            v.data = None
+        self.update_saved()
 
 
 # class CombinedOperation(Operation):
@@ -208,15 +204,24 @@ class OperationTape(list):
 
             taped_grad = []
             for data, v in zip(grad_in_data, op.vars_in):
+                var_tag = None
+                if (full_spec := f"{op.name}:{v.tag}") in tags_build_list:
+                    var_tag = full_spec
+                if v.tag in tags_build_list:
+                    if var_tag is None:
+                        var_tag = v.tag
+                    else:
+                        warn(f"Full tag specification {var_tag} shadows {v.tag}")
                 if not v.external:
                     taped_grad.append(data)
-                    if v.tag in tags_build_list or f"{op.name}:{v.tag}" in tags_build_list:
-                        warn("gradient of intermediate result cannot be collected")
+                    if var_tag is not None:
+                        if (data_out := out.get(v.tag)) is not None:
+                            tags_build_list[var_tag].append(data_out)
+                        else:
+                            warn("gradient of intermediate result cannot be collected")
                 else:
-                    if v.tag in tags_build_list:
-                        tags_build_list[v.tag].append(data)
-                    if (op_var := f"{op.name}:{v.tag}") in tags_build_list:
-                        tags_build_list[op_var].append(data)
+                    if var_tag in tags_build_list:
+                        tags_build_list[var_tag].append(data)
             if clear:
                 op.clear()
         if clear:

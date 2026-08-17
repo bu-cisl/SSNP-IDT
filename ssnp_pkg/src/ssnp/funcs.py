@@ -1,12 +1,15 @@
+import logging
+from contextlib import contextmanager
+from functools import partial, lru_cache
+
+import numpy as np
+import pycuda.driver
 from pycuda import elementwise, gpuarray, reduction
 from pycuda.gpuarray import GPUArray
 from pycuda.tools import dtype_to_ctype
-import numpy as np
-from ssnp.utils import Multipliers, get_stream_in_current
-from contextlib import contextmanager
-from functools import partial, lru_cache
 from skcuda import fft as skfft
-import logging
+
+from ssnp.utils import Multipliers, get_stream_in_current
 
 _funcs_cache = {}
 _generic_funcs = {
@@ -20,9 +23,8 @@ _generic_funcs = {
     'reduce_sse_cc_krn': lambda: reduction.ReductionKernel(
         dtype_out=np.double, neutral=0,
         reduce_expr="a+b",
-        map_expr="cuCabs(cuCsub(x[i], y[i])) * cuCabs(cuCsub(x[i], y[i]))",
+        map_expr="(x[i].x - y[i].x) * (x[i].x - y[i].x) + (x[i].y - y[i].y) * (x[i].y - y[i].y)",
         arguments="double2 *x, double2 *y",
-        preamble='#include "cuComplex.h"'
     ),
     'mse_cc_grad_krn': lambda: elementwise.ElementwiseKernel(
         "double2 *u, double2 *m, double2 *out",
@@ -170,12 +172,25 @@ class Funcs:
                                  out.gpudata, x.mem_size)
         return out
 
-    def reduce_sse(self, field, measurement):
+    def reduce_sse(self, field, measurement, temp_arr=None):
+        if temp_arr is None:
+            allocator = pycuda.driver.mem_alloc
+        else:
+            alloc_start = temp_arr.ptr
+            alloc_limit = alloc_start + temp_arr.mem_size
+            def allocator(size):
+                nonlocal alloc_start
+                ptr = alloc_start
+                alloc_start += size
+                if alloc_start > alloc_limit:
+                    logging.warning("temp_arr does not have enough space")
+                    return pycuda.driver.mem_alloc(size)
+                return ptr
         if field.dtype == np.complex128:
             if measurement.dtype == np.float64:
-                return self.reduce_sse_cr_krn(field, measurement, stream=self.stream)
+                return self.reduce_sse_cr_krn(field, measurement, stream=self.stream, allocator=allocator)
             elif measurement.dtype == np.complex128:
-                return self.reduce_sse_cc_krn(field, measurement, stream=self.stream)
+                return self.reduce_sse_cc_krn(field, measurement, stream=self.stream, allocator=allocator)
         raise TypeError(f"incompatible dtype: field {field.dtype}, measurement {measurement.dtype}")
 
     def mse_grad(self, field, measurement, gradient):

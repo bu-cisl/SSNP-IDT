@@ -42,7 +42,7 @@ for step in range(STEPS):
         beam.ssnp(1, n)
         beam.ssnp(-len(n) / 2)
         beam.a_mul(pupil)
-        loss = beam.forward_mse_loss(mea)
+        loss = beam.mse_loss(mea)
     print(f"{loss = :f}")
     loss = [calc.reduce_mse(beam.forward[i], mi) for i, mi in enumerate(mea)]
     print(f"loss detail: {', '.join([f'{i:.2e}' for i in loss])}")
